@@ -1,7 +1,16 @@
 # Custom exceptions for this project
 # Add any project-specific ignores here
 
+# Large local data. `samples/*`, not `samples/`, so the plan can be re-included.
 samples/*
+
+# Render outputs and IQ/waterfall data
+out/
+*.cu8
+*.wav
+*.raw
+
+checkpoint.md
 
 
 # OS generated files

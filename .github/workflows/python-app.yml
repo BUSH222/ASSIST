@@ -39,7 +39,7 @@ jobs:
         with:
           python-version-file: "pyproject.toml"
       
-      - name: Install dependencies
+      - name: Install dependencies (builds the C++ extension)
         run: |
           uv sync --all-groups
           uv pip list
@@ -60,3 +60,34 @@ jobs:
             echo "::error::uv.lock is out of date. Run 'uv lock' to update."
             exit 1
           fi
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # macos-15-intel matches the dev machine (Intel Mac); it is GitHub's last Intel macOS image.
+        os: [ubuntu-latest, macos-15-intel]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          cache-suffix: "test"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install dependencies (builds the C++ extension)
+        run: uv sync --all-groups
+
+      - name: Run tests
+        run: uv run pytest
