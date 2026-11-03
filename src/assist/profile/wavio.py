@@ -13,7 +13,10 @@ from pathlib import Path
 
 import numpy as np
 
+from assist.timebase import parse_tz
 from assist.waterfall import iq_from_u8
+
+__all__ = ["Recording", "WavInfo", "parse_tz", "read_wav_info", "sdrpp_name_info"]
 
 _U32_MAX = 0xFFFFFFFF
 _FORMAT_PCM = 1
@@ -23,17 +26,6 @@ _FORMAT_EXTENSIBLE = 0xFFFE
 _SDRPP_NAME = re.compile(
     r"baseband_(?P<fc>\d+)Hz_(?P<H>\d{2})-(?P<M>\d{2})-(?P<S>\d{2})_(?P<d>\d{2})-(?P<m>\d{2})-(?P<Y>\d{4})"
 )
-
-
-def parse_tz(tz: str) -> dt.tzinfo:
-    """Fixed UTC offset from "+03:00" / "-05:30" / "UTC"."""
-    if tz.upper() in {"UTC", "Z", "+00:00"}:
-        return dt.UTC
-    m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", tz)
-    if not m:
-        raise ValueError(f"time zone must look like +03:00, got {tz!r}")
-    sign = 1 if m.group(1) == "+" else -1
-    return dt.timezone(sign * dt.timedelta(hours=int(m.group(2)), minutes=int(m.group(3))))
 
 
 def sdrpp_name_info(name: str, tz: str) -> tuple[dt.datetime, int]:

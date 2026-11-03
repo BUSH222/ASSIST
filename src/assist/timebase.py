@@ -79,6 +79,33 @@ def parse_duration(v: str | float) -> float:
     return float(m.group(1)) * _UNITS[m.group(2) or "s"]
 
 
+def parse_tz(tz: str) -> dt.tzinfo:
+    """Fixed UTC offset from "+03:00" / "-05:30" / "UTC"."""
+    if tz.upper() in {"UTC", "Z", "+00:00"}:
+        return dt.UTC
+    m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", tz)
+    if not m:
+        raise ValueError(f"time zone must look like +03:00, got {tz!r}")
+    sign = 1 if m.group(1) == "+" else -1
+    return dt.timezone(sign * dt.timedelta(hours=int(m.group(2)), minutes=int(m.group(3))))
+
+
+# --- the stream's sample grid (plan §3.1) ---
+# Wideband sample n (an integer counted from the Unix epoch) is at n / fs. In 2026 n is about 4.3e15 at 2.4 MS/s, below
+# 2^53, so it is exact as an integer and as a float64. Float Unix times resolve only ~0.24 us, so sample positions are
+# always integers, and float times are derived from them, never the other way round.
+
+
+def to_us(t_unix: float) -> int:
+    """Integer microseconds of a Unix time (times parsed from ISO strings are whole microseconds)."""
+    return round(t_unix * 1e6)
+
+
+def sample_at(t_unix: float, fs: int) -> int:
+    """The absolute sample index nearest t (exact integer arithmetic on microseconds; ties go up)."""
+    return (to_us(t_unix) * fs + 500_000) // 1_000_000
+
+
 def parse_time(s: str | float, ref_unix: float) -> float:
     """A point in time: ISO 8601, `start` (= ref), or an offset from ref such as `+2min` or `-30s`."""
     if isinstance(s, int | float) and not isinstance(s, bool):

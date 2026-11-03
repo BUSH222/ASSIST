@@ -21,7 +21,7 @@ elements_app = typer.Typer(help="Element sets (retlector.eu snapshots).", no_arg
 
 ScenarioArg = Annotated[Path, typer.Argument(help="Scenario (.yaml, .yml or .json; a resolved one works too).")]
 SetOpt = Annotated[
-    list[str] | None, typer.Option("--set", help="Override a field: path=value, e.g. sources[z1].freq_hz=137.35e6.")
+    list[str] | None, typer.Option("--set", help="Override a field: path=value, e.g. sources\\[z1].freq_hz=137.35e6.")
 ]
 FromOpt = Annotated[str | None, typer.Option("--from", help="ISO time, `start`, or +offset (default: clock start).")]
 ToOpt = Annotated[str | None, typer.Option("--to", help="ISO time or +offset from the clock start (default: end).")]
@@ -236,6 +236,81 @@ def truth(
             write(table.events, tr.EVENT_COLUMNS, f)
         msg += f", {len(table.events)} events -> {ev_path}"
     typer.echo(msg, err=True)
+
+
+@app.command()
+def render(
+    scenario: ScenarioArg,
+    out: Annotated[Path, typer.Option("-o", "--out", help="Output directory (files + run.json).")],
+    t_from: FromOpt = None,
+    duration: Annotated[
+        str | None, typer.Option(help="e.g. 90s, 16min, 2h (default: to the end of the scenario clock).")
+    ] = None,
+    fmt: Annotated[str, typer.Option("--format", help="wav (split every 10 min) or cu8 (one raw file).")] = "wav",
+    rf64: Annotated[bool, typer.Option("--rf64", help="With wav: one RF64 file instead of 10 min splits.")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing output files.")] = False,
+    set_: SetOpt = None,
+) -> None:
+    """Render the station's uint8 IQ stream to files (Python reference engine)."""
+    import time
+
+    from assist.engine.control import RenderError
+    from assist.engine.render import Renderer
+    from assist.engine.scene import Scene
+    from assist.sinks import runinfo
+    from assist.sinks.wavfile import FileSink, plan_files
+    from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
+
+    if fmt not in ("wav", "cu8"):
+        raise typer.BadParameter("--format must be wav or cu8")
+    if rf64 and fmt != "wav":
+        raise typer.BadParameter("--rf64 goes with --format wav")
+    kind = "rf64" if rf64 else fmt
+    r = _resolve(scenario, set_)
+    sc = r.scenario
+    t0 = parse_iso(sc.clock.start)
+    a = parse_time(t_from, t0) if t_from else t0
+    dur = parse_duration(duration) if duration else t0 + sc.clock.duration - a
+    if dur <= 0:
+        raise typer.BadParameter("nothing to render: the window is empty")
+    try:
+        rd = Renderer(Scene(sc))
+    except (RenderError, ValueError, NotImplementedError) as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from e
+    n0, n = sample_at(a, rd.fs), round(dur * rd.fs)
+    files = plan_files(out, kind, rd.fc_hz, rd.fs, sc.station.tz, n0, n)
+    run_path = out / "run.json"
+    existing = [p for p in [*(f.path for f in files), run_path] if p.exists()]
+    if existing and not force:
+        typer.echo(f"error: {existing[0]} exists (use --force to overwrite)", err=True)
+        raise typer.Exit(1)
+    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, kind, n0, n, files, "rendering"))
+    typer.echo(
+        f"rendering {n / rd.fs:.1f} s from {format_iso(n0 / rd.fs, 3)} into {len(files)} file(s) in {out}", err=True
+    )
+    sink = FileSink(files, kind, rd.fs)
+    tic = time.perf_counter()
+    report = 60 * rd.fs
+    try:
+        for chunk in rd.iter_u8(n0, n):
+            sink.write(chunk)
+            if sink.written >= report or sink.written == n:
+                done_s = sink.written / rd.fs
+                speed = done_s / (time.perf_counter() - tic)
+                typer.echo(f"  {done_s:7.1f} / {n / rd.fs:.1f} s  ({speed:.1f}x real time)", err=True)
+                report += 60 * rd.fs
+        sink.close()
+    except RenderError as e:
+        sink.close_quietly()
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from e
+    elapsed = time.perf_counter() - tic
+    info = runinfo.run_info(r, rd, kind, n0, n, files, "complete", render_seconds=round(elapsed, 3))
+    runinfo.write_run_json(run_path, info)
+    for f in files:
+        typer.echo(str(f.path))
+    typer.echo(f"done: {n / rd.fs / elapsed:.1f}x real time, scenario hash {r.hash}", err=True)
 
 
 @elements_app.command()

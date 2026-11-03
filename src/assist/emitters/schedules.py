@@ -75,6 +75,10 @@ class Schedule(ABC):
         """Events overlapping [t0, t1) (event schedules only)."""
         return []
 
+    @abstractmethod
+    def active_intervals(self, t0: float, t1: float) -> list[tuple[float, float]]:
+        """Intervals overlapping [t0, t1) outside which the envelope is exactly 0 (ramps included)."""
+
 
 class Continuous(Schedule):
     @override
@@ -84,6 +88,10 @@ class Continuous(Schedule):
     @override
     def envelope(self, t: np.ndarray) -> np.ndarray:
         return np.ones(np.shape(t))
+
+    @override
+    def active_intervals(self, t0: float, t1: float) -> list[tuple[float, float]]:
+        return [(t0, t1)]
 
 
 @dataclass
@@ -135,6 +143,11 @@ class OnOff(Schedule):
         env[(u >= r) & (u < self.on_s)] = 1.0
         return env
 
+    @override
+    def active_intervals(self, t0: float, t1: float) -> list[tuple[float, float]]:
+        h = self.ramp_ms / 2000.0
+        return [(a - h, b + h) for a, b in self.on_intervals(t0 - h, t1 + h)]
+
 
 class _EventSchedule(Schedule):
     is_event = True
@@ -169,6 +182,10 @@ class _EventSchedule(Schedule):
         for e in self.events(float(t.min()), float(t.max()) + step_s):
             out += np.clip(np.minimum(t + step_s, e.end) - np.maximum(t, e.start), 0, None) / step_s
         return out
+
+    @override
+    def active_intervals(self, t0: float, t1: float) -> list[tuple[float, float]]:
+        return [(e.start, e.end) for e in self.events(t0, t1)]
 
     @override
     def envelope(self, t: np.ndarray) -> np.ndarray:

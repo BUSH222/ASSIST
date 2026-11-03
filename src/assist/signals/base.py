@@ -48,11 +48,19 @@ class Signal(ABC):
     kind: ClassVar[str]
 
     @abstractmethod
-    def bandwidth_hz(self) -> float: ...
+    def bandwidth_hz(self) -> float:
+        """Occupied bandwidth (Hz) of the baseband signal, used by the narrow-rate rule (plan §4.2)."""
+
+    @abstractmethod
+    def preferred_rate(self) -> int:
+        """Lowest narrow rate (Hz, a multiple of 100) the signal wants, e.g. sps * symbol rate."""
 
     @abstractmethod
     def render(self, n0: int, n: int, rate: int) -> np.ndarray:
-        """n samples at `rate` starting at absolute narrow-rate index n0."""
+        """n samples (complex64, unit mean power while on) at `rate`, starting at absolute narrow index n0.
+
+        Index n is at Unix time n / rate, so content is addressed by absolute time (plan §3.1).
+        """
 
 
 def make_signal(kind: str, params: dict[str, object]) -> Signal:

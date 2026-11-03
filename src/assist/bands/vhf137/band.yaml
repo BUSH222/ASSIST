@@ -15,6 +15,10 @@ defaults:
     iip3_dbm: -30.0                    # assumption (plan §12)
   antenna:
     pattern: qfh_poly
+# Receiver noise without a profile (plan §4.3, §4.4): a flat shape, and the ADC noise sigma per I/Q component
+# (counts). Copied from profiles/vhf137 (adc.noise_sigma_mad_counts; a test checks they match).
+noise:
+  sigma_counts: 26.687
 # Calibrated levels, used when a scenario has no profile. Link constant = the C/N0 (dB-Hz) the link would give at
 # 0 dB total path gain (G_tx + G_rx - FSPL = 0); P_tx = link constant + 10 log10(k T_sys), so the calibrated SNR
 # holds for any T_ant. Copied from profiles/vhf137 (a test checks they match).

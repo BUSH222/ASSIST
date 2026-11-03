@@ -74,11 +74,9 @@ class Emitter:
     def is_event(self) -> bool:
         return self.schedule.is_event
 
-    def level(
-        self, t: np.ndarray, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """(rx_dbm, cn0_dbhz) at the given geometry, including AM."""
-        rx = link.p_rx_dbm(
+    def link_dbm(self, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray) -> np.ndarray:
+        """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2)."""
+        return link.p_rx_dbm(
             self.p_tx_dbw,
             self.tx_pattern.gain_db(off_nadir),
             rng_m,
@@ -87,6 +85,12 @@ class Emitter:
             self.horizon.loss_db(az, el),
             self.extra_loss_db,
         )
+
+    def level(
+        self, t: np.ndarray, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """(rx_dbm, cn0_dbhz) at the given geometry, including AM."""
+        rx = self.link_dbm(el, az, rng_m, off_nadir)
         if self.am is not None:
             rx = rx + self.am.gain_db(t)
         return rx, rx - 30 - link.kt_dbw_hz(self.t_sys_k)

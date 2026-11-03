@@ -15,5 +15,9 @@ class CW(Signal):
         return 0.0
 
     @override
+    def preferred_rate(self) -> int:
+        return 100
+
+    @override
     def render(self, n0: int, n: int, rate: int) -> np.ndarray:
         return np.ones(n, dtype=np.complex64)

@@ -214,6 +214,23 @@ class SplineGeometry:
             out["rr"][m], out["on"][m] = g.range_rate_m_s, g.off_nadir_deg
         return Geometry(out["el"], out["az"], out["r"], out["rr"], out["on"])
 
+    def geometry_ms(self, k_ms: np.ndarray) -> Geometry:
+        """Geometry at integer Unix milliseconds (the renderer's control grid).
+
+        Float Unix seconds resolve only ~0.24 us (range error up to ~2 mm, i.e. phase jitter of a few mrad at
+        137 MHz). Here the time within the block is formed from integers first, so it is exact to ~1e-13 s.
+        """
+        k = np.asarray(k_ms, dtype=np.int64)
+        idx = k // (BLOCK_S * 1000)
+        out = {n: np.empty(k.shape) for n in ("el", "az", "r", "rr", "on")}
+        for b in np.unique(idx):
+            m = idx == b
+            blk = self._block(int(b))
+            g = blk.geometry((k[m] - int(b) * BLOCK_S * 1000) / 1000.0)
+            out["el"][m], out["az"][m], out["r"][m] = g.el_deg, g.az_deg, g.range_m
+            out["rr"][m], out["on"][m] = g.range_rate_m_s, g.off_nadir_deg
+        return Geometry(out["el"], out["az"], out["r"], out["rr"], out["on"])
+
     def _crossings_between(self, a: float, b: float) -> list[_Crossing]:
         out: list[_Crossing] = []
         for i in range(int(np.floor(a / BLOCK_S)), int(np.floor(b / BLOCK_S)) + 1):

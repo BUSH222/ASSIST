@@ -66,15 +66,34 @@ class Lna(_M):
 
 class Frontend(_M):
     fc_hz: float
-    fs_hz: float
+    fs_hz: float = Field(description="Sample rate; an integer multiple of 100 Hz (10 ms hops).")
     tuner_gain_db: float
-    ppm: float
+    ppm: float = Field(description="Crystal error (sample clock and LO), plan §3.1. Only 0 is supported until M7.")
     lna: Lna
     tuner_nf_db: float
     saw_loss_db: float = Field(description="SAW loss used for T_sys (scalar until the SAW table arrives in M7).")
     t_ant_k: float
     image_db: float
     iip3_dbm: float
+    noise_sigma_counts: float | None = Field(
+        None, gt=0, description="ADC noise sigma per I/Q component (counts). Default: the profile's, else the band's."
+    )
+
+    @field_validator("ppm")
+    @classmethod
+    def _ppm(cls, v: float) -> float:
+        if v != 0:
+            raise ValueError(
+                "only 0 is supported until M7 (the crystal error of the stream clock is not modelled yet)"
+            )
+        return v
+
+    @field_validator("fs_hz")
+    @classmethod
+    def _fs(cls, v: float) -> float:
+        if v <= 0 or v != int(v) or int(v) % 100:
+            raise ValueError("fs_hz must be a positive integer multiple of 100 Hz")
+        return v
 
 
 def _pattern_alias(v: Any) -> Any:

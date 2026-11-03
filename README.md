@@ -6,8 +6,9 @@ ADRIFT can be tested against a sky whose content is known exactly.
 
 The implementation plan (`samples/plan.md`) and the per-milestone `checkpoint.md` are kept locally, not in git.
 
-Status: M2 (scenario and sky). Scenarios resolve to a self-contained document, and the truth (frequencies,
-Doppler, geometry, levels, events) can be computed; IQ rendering arrives in M3.
+Status: M3 (render engine, Python reference). Scenarios resolve to a self-contained document, the truth
+(frequencies, Doppler, geometry, levels, events) can be computed, and `cw` emitters (zombies) render to the station's
+uint8 IQ stream with profile-shaped noise, written as SDR++-style WAV or raw cu8 files. rtl_tcp serving arrives in M4.
 
 ## Usage
 
@@ -17,14 +18,18 @@ uv run assist resolve  scenarios/example.yaml -o out/resolved.json
 uv run assist passes   scenarios/example.yaml --to +6h        # pass table of all satellite sources
 uv run assist truth    scenarios/example.yaml -o out/truth.csv --to +2h [--step 1s] [--format jsonl]
 uv run assist catalog  scenarios/example.yaml -o out/catalog.tle   # element sets ADRIFT is given
+uv run assist render   scenarios/zombie_single.yaml -o out/m3      # WAV files (10 min each) + run.json
+uv run assist render   scenarios/zombie_single.yaml -o out/raw --format cu8 --from +7min --duration 90s
 uv run assist schema                                          # JSON Schema of a scenario
 uv run assist elements fetch                                  # network: dated retlector.eu snapshots
 uv run assist profile  build | labels | report                # data survey of samples/ (M1)
 ```
 
-Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`). The
-station position is read from `samples/station.yaml` when present; otherwise the rounded position
-(55.5 N, 37.1 E, 172 m) is used.
+Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`).
+Renders are byte-identical for the same scenario, and any window equals the same slice of a longer render. WAV files
+are named like SDR++ recordings (`baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav`, station local time); `--rf64` writes
+one file instead of 10 min splits. The station position is read from `samples/station.yaml` when present; otherwise
+the rounded position (55.5 N, 37.1 E, 172 m) is used.
 
 ## Development
 
