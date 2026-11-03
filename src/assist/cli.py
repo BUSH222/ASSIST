@@ -22,6 +22,15 @@ def _print_version(value: bool) -> None:
         raise typer.Exit()
 
 
+def _register_subcommands() -> None:
+    from assist.profile.cli import app as profile_app
+
+    app.add_typer(profile_app, name="profile")
+
+
+_register_subcommands()
+
+
 @app.callback()
 def main(
     version: Annotated[

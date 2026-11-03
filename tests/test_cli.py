@@ -24,3 +24,10 @@ def test_version() -> None:
 def test_no_args_shows_help() -> None:
     result = runner.invoke(app, [])
     assert "Usage" in result.output
+
+
+def test_profile_subcommands_registered() -> None:
+    result = runner.invoke(app, ["profile", "--help"])
+    assert result.exit_code == 0
+    for cmd in ("build", "labels", "report"):
+        assert cmd in result.output

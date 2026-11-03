@@ -1,0 +1,1091 @@
+{
+ "version": 1,
+ "band": "vhf137",
+ "fc_hz": 137000000.0,
+ "fs_hz": 2400000,
+ "fft_size": 16384,
+ "station": {
+  "lat_lon_rounded": [
+   55.5,
+   37.1
+  ],
+  "alt_m": 172.0,
+  "tz": "+03:00"
+ },
+ "inputs": {
+  "recording": {
+   "file": "baseband_137000000Hz_19-39-00_01-11-2026.wav",
+   "bytes": 7556352044
+  },
+  "waterfalls": [
+   {
+    "file": "waterfall_1790507202.raw",
+    "bytes": 1415577600
+   },
+   {
+    "file": "waterfall_1792835688.raw",
+    "bytes": 1415577600
+   }
+  ],
+  "elements": [
+   {
+    "file": "active.csv",
+    "bytes": 2477559
+   },
+   {
+    "file": "satnogs.csv",
+    "bytes": 90923
+   }
+  ],
+  "saw": {
+   "file": "saw.csv",
+   "points": 481
+  }
+ },
+ "annotations": [
+  {
+   "file": "baseband_137000000Hz_19-39-00_01-11-2026.wav",
+   "from_s": 1405.0,
+   "to_s": 1574.24,
+   "label": "orbcomm",
+   "exclude_from": [
+    "noise",
+    "occupancy"
+   ]
+  },
+  {
+   "file": "baseband_137000000Hz_19-39-00_01-11-2026.wav",
+   "from_s": 0.0,
+   "to_s": 445.0,
+   "label": "local_interference",
+   "exclude_from": [
+    "noise"
+   ]
+  }
+ ],
+ "recording": {
+  "start_utc": "2026-11-01T16:39:00.000Z",
+  "duration_s": 1574.24,
+  "n_samples": 3778176000,
+  "riff": "RIFF",
+  "size_fields_wrong": true,
+  "auxi": false,
+  "start_time_source": "SDR++ file name (local time +03:00)"
+ },
+ "waterfalls": [
+  {
+   "file": "waterfall_1790507202.raw",
+   "rows": 86400,
+   "first_row_utc": "2026-09-27T11:06:47.495Z",
+   "last_row_utc": "2026-09-28T11:02:00.802Z"
+  },
+  {
+   "file": "waterfall_1792835688.raw",
+   "rows": 86400,
+   "first_row_utc": "2026-10-24T09:54:53.495Z",
+   "last_row_utc": "2026-10-25T09:50:06.802Z"
+  }
+ ],
+ "adc": {
+  "seconds_total": 1574,
+  "seconds_clean": 957,
+  "dc_i_counts": -0.056649,
+  "dc_q_counts": -0.056792,
+  "rms_counts": 36.302136,
+  "noise_sigma_mad_counts": 26.6868,
+  "noise_sigma_mad_counts_p10_p90": [
+   25.2042,
+   28.1694
+  ],
+  "rms_counts_all_p50_p99": [
+   37.071285,
+   42.885541
+  ],
+  "clip_fraction_median": 0.015117,
+  "clip_fraction_mean": 0.01706,
+  "clip_fraction_max_1s": 0.042189,
+  "value_fraction_0_1_254_255": [
+   2e-06,
+   0.008542,
+   0.008491,
+   2.5e-05
+  ],
+  "iq_gain_ratio": 0.99978,
+  "iq_corr": 9e-06,
+  "iq_phase_deg": 0.000512,
+  "image_rejection_from_stats_db": -79.144548
+ },
+ "birdies": {
+  "count": 15,
+  "file": "birdies.json",
+  "recording_rows_1db": [
+   136925292.96875,
+   137611572.265625,
+   137628417.96875
+  ]
+ },
+ "noise": {
+  "psd_file": "noise_psd.npy",
+  "psd_reference": "dB, 0 = median 136.2-137.8 MHz (VDL excluded); ~4.5 kHz smoothing; DC, birdies removed",
+  "psd_source": "median of per-minute means of both .raw days; recording shape spliced where days clip",
+  "clipped_bins_from_recording": 1754,
+  "recording_vs_days_shape_rms_db": 0.985491,
+  "days_shape_rms_db": 0.294852,
+  "dc_spike": {
+   "centre_bin_excess_db": 0.594117,
+   "per_day": [
+    {
+     "centre_bin_excess_db": 0.647058,
+     "plus_minus_1_bin_excess_db": 0.325
+    },
+    {
+     "centre_bin_excess_db": 0.541176,
+     "plus_minus_1_bin_excess_db": 0.258823
+    }
+   ],
+   "amplitude_counts_est": 0.158703,
+   "recording": {
+    "centre_bin_excess_db": -0.177416,
+    "plus_minus_1_bin_excess_db": -0.086828
+   },
+   "note": "recording shows a DC notch instead (DC removed before recording)"
+  },
+  "sigma_counts": 26.6868,
+  "hourly_file": "noise_hourly.npy",
+  "hourly_utc_db": [
+   0.085118,
+   0.180199,
+   0.30222,
+   -0.339324,
+   -1.010529,
+   -1.300202,
+   -1.205041,
+   -1.037082,
+   -1.123197,
+   -0.788266,
+   -1.14454,
+   -0.905341,
+   -1.226529,
+   -1.0817,
+   -0.285329,
+   0.261076,
+   1.628699,
+   1.379997,
+   0.254562,
+   0.250234,
+   0.144772,
+   0.171703,
+   0.004478,
+   0.099375
+  ],
+  "regimes_per_day": [
+   {
+    "threshold_db": 2.187572,
+    "quiet_level_db": 1.161842,
+    "loud_level_db": 2.511259,
+    "loud_fraction": 0.509722,
+    "loud_episodes": 8,
+    "loud_episode_minutes_p10_p50_p90": [
+     1.0,
+     3.0,
+     219.8
+    ]
+   },
+   {
+    "threshold_db": 0.322405,
+    "quiet_level_db": -0.09264,
+    "loud_level_db": 1.215888,
+    "loud_fraction": 0.705556,
+    "loud_episodes": 31,
+    "loud_episode_minutes_p10_p50_p90": [
+     1.0,
+     6.0,
+     15.0
+    ]
+   }
+  ]
+ },
+ "mirror": {
+  "image_vs_source_minute_scale": {
+   "waterfall_1790507202.raw": [
+    {
+     "source_hz": 136925000.0,
+     "image_db": -22.206864,
+     "detection_limit_db": -33.714566,
+     "source_snr_db": 10.450574,
+     "spectra_used": 288
+    },
+    {
+     "source_hz": 136975000.0,
+     "image_db": null,
+     "detection_limit_db": -34.6116,
+     "source_snr_db": 3.107217,
+     "spectra_used": 288
+    },
+    {
+     "source_hz": 137900000.0,
+     "image_db": -24.996174,
+     "detection_limit_db": -29.919561,
+     "source_snr_db": 0.403624,
+     "spectra_used": 288
+    }
+   ],
+   "waterfall_1792835688.raw": [
+    {
+     "source_hz": 136925000.0,
+     "image_db": -22.215729,
+     "detection_limit_db": -32.603936,
+     "source_snr_db": 10.238828,
+     "spectra_used": 288
+    },
+    {
+     "source_hz": 136975000.0,
+     "image_db": null,
+     "detection_limit_db": -36.321909,
+     "source_snr_db": 3.372162,
+     "spectra_used": 288
+    },
+    {
+     "source_hz": 137900000.0,
+     "image_db": -25.272302,
+     "detection_limit_db": -30.180332,
+     "source_snr_db": -0.885971,
+     "spectra_used": 288
+    }
+   ],
+   "baseband_137000000Hz_19-39-00_01-11-2026.wav": [
+    {
+     "source_hz": 136925000.0,
+     "image_db": -23.886151,
+     "detection_limit_db": -33.166023,
+     "source_snr_db": 12.028118,
+     "spectra_used": 314
+    },
+    {
+     "source_hz": 136975000.0,
+     "image_db": null,
+     "detection_limit_db": -39.855312,
+     "source_snr_db": 11.52297,
+     "spectra_used": 314
+    },
+    {
+     "source_hz": 137900000.0,
+     "image_db": -1.590517,
+     "detection_limit_db": -20.017391,
+     "source_snr_db": -12.991247,
+     "spectra_used": 314
+    }
+   ]
+  },
+  "coherent_iq_image_recording": [
+   {
+    "offset_hz": -75000.0,
+    "beta_db": -74.801163,
+    "beta_phase_deg": -105.046427,
+    "coherence": 0.0,
+    "seconds": 60.0
+   },
+   {
+    "offset_hz": -25000.0,
+    "beta_db": -78.352723,
+    "beta_phase_deg": -38.312029,
+    "coherence": 0.0,
+    "seconds": 60.0
+   }
+  ],
+  "carrier138_vs_mirror_recording": {
+   "offset_hz": 1110058.59375,
+   "beta_db": -64.322066,
+   "beta_phase_deg": 133.744886,
+   "coherence": 4e-06,
+   "seconds": 0.996693,
+   "row_excess_db": 9.641447
+  },
+  "band138_events_vs_mirror": {
+   "events_tested": 208,
+   "event_excess_db_p50": 10.803922,
+   "mirror_excess_db_p50_p90": [
+    -1e-06,
+    -1e-06
+   ],
+   "mirror_detected_fraction_gt_3db": 0.0,
+   "note": "mirror band 135.8-136.0 MHz is near the waterfall floor (SAW notch); only strong mirrors are visible"
+  }
+ },
+ "occupancy": {
+  "rows_on_off_db": [
+   6.0,
+   3.0
+  ],
+  "row_s": 0.996693,
+  "vdl": {
+   "vdl_136.925": {
+    "events_per_day": 19376.5,
+    "duty_rows": [
+     0.547245,
+     0.533449
+    ],
+    "events_per_hour_utc": [
+     761.5,
+     747.0,
+     832.0,
+     858.0,
+     949.5,
+     851.0,
+     908.5,
+     750.0,
+     713.0,
+     839.0,
+     791.5,
+     773.0,
+     878.0,
+     827.5,
+     719.5,
+     707.5,
+     680.5,
+     839.0,
+     773.5,
+     818.5,
+     870.5,
+     778.0,
+     826.5,
+     883.5
+    ],
+    "duration_s": {
+     "n": 38753,
+     "mu": 0.578557,
+     "sigma": 0.661795,
+     "median": 1.993387,
+     "p10": 0.996693,
+     "p90": 3.986773
+    },
+    "peak_excess_db_p10_p50_p90": [
+     7.660156,
+     10.554688,
+     15.1875
+    ],
+    "recording_fine_time": {
+     "events": 4258,
+     "duty": 0.063591,
+     "duration_s": {
+      "n": 4258,
+      "mu": -3.883486,
+      "sigma": 0.22196,
+      "median": 0.02176,
+      "p10": 0.013227,
+      "p90": 0.02304
+     },
+     "gap_s": {
+      "mean": 0.30875,
+      "n": 4257,
+      "mu": -2.464334,
+      "sigma": 2.114117,
+      "median": 0.085333,
+      "p10": 0.004693,
+      "p90": 0.818347
+     },
+     "peak_excess_db_p10_p50_p90": [
+      13.59607,
+      14.190325,
+      28.342525
+     ]
+    }
+   },
+   "vdl_136.975": {
+    "events_per_day": 13362.5,
+    "duty_rows": [
+     0.25537,
+     0.25265
+    ],
+    "events_per_hour_utc": [
+     269.5,
+     142.0,
+     277.0,
+     487.5,
+     503.5,
+     634.0,
+     655.5,
+     708.0,
+     664.0,
+     652.0,
+     700.0,
+     556.0,
+     538.5,
+     575.0,
+     639.0,
+     613.0,
+     569.5,
+     524.5,
+     735.5,
+     725.5,
+     719.5,
+     613.0,
+     499.5,
+     361.0
+    ],
+    "duration_s": {
+     "n": 26725,
+     "mu": 0.324452,
+     "sigma": 0.490536,
+     "median": 0.996693,
+     "p10": 0.996693,
+     "p90": 2.99008
+    },
+    "peak_excess_db_p10_p50_p90": [
+     8.5,
+     16.4375,
+     19.53125
+    ],
+    "recording_fine_time": {
+     "events": 932,
+     "duty": 0.015013,
+     "duration_s": {
+      "n": 932,
+      "mu": -3.817526,
+      "sigma": 0.28372,
+      "median": 0.022613,
+      "p10": 0.021333,
+      "p90": 0.0256
+     },
+     "gap_s": {
+      "mean": 1.485323,
+      "n": 931,
+      "mu": -0.324513,
+      "sigma": 1.457044,
+      "median": 0.9088,
+      "p10": 0.1088,
+      "p90": 3.622827
+     },
+     "peak_excess_db_p10_p50_p90": [
+      11.489566,
+      23.116652,
+      32.172981
+     ]
+    }
+   }
+  },
+  "vdl_spill_channels": [
+   "vdl_136.950"
+  ],
+  "am": {
+   "voice_like_max_duration_s": 60,
+   "events_per_day": 1250.5,
+   "events_per_hour_utc": [
+    14.5,
+    3.0,
+    0.0,
+    8.0,
+    30.5,
+    77.5,
+    140.0,
+    71.0,
+    94.5,
+    56.0,
+    83.5,
+    47.0,
+    16.5,
+    211.0,
+    22.0,
+    16.0,
+    27.0,
+    44.0,
+    48.5,
+    90.5,
+    91.0,
+    36.5,
+    5.5,
+    16.5
+   ],
+   "duration_s": {
+    "n": 2501,
+    "mu": 1.089763,
+    "sigma": 0.739651,
+    "median": 2.99008,
+    "p10": 0.996693,
+    "p90": 6.976853
+   },
+   "peak_excess_db_p10_p50_p90": [
+    6.285156,
+    7.972656,
+    18.421875
+   ],
+   "top_channels": [
+    [
+     "am_136.2000",
+     407.5
+    ],
+    [
+     "am_136.2583",
+     180.0
+    ],
+    [
+     "am_136.6750",
+     97.0
+    ],
+    [
+     "am_136.1000",
+     87.0
+    ],
+    [
+     "am_136.4750",
+     66.5
+    ],
+    [
+     "am_136.1500",
+     24.0
+    ],
+    [
+     "am_136.4417",
+     23.0
+    ],
+    [
+     "am_135.8417",
+     22.0
+    ],
+    [
+     "am_135.8500",
+     21.5
+    ],
+    [
+     "am_136.6667",
+     19.5
+    ]
+   ],
+   "excluded_birdie_channels": [
+    "am_136.0500",
+    "am_136.4667",
+    "am_136.6500"
+   ],
+   "long_carriers_per_day": 24.0
+  },
+  "band138": {
+   "events_per_day": 414.5,
+   "events_per_hour_utc": [
+    0.0,
+    1.5,
+    5.0,
+    18.5,
+    29.5,
+    21.5,
+    35.0,
+    32.0,
+    19.0,
+    17.0,
+    40.0,
+    22.0,
+    21.0,
+    25.0,
+    24.0,
+    27.5,
+    11.5,
+    8.0,
+    9.0,
+    16.5,
+    19.0,
+    1.0,
+    2.5,
+    8.5
+   ],
+   "duration_s": {
+    "n": 829,
+    "mu": 1.339716,
+    "sigma": 0.742332,
+    "median": 3.986773,
+    "p10": 1.993387,
+    "p90": 7.973547
+   },
+   "peak_excess_db_p10_p50_p90": [
+    6.970313,
+    10.90625,
+    17.56875
+   ],
+   "freq_mhz_p10_p50_p90": [
+    138.110205,
+    138.110352,
+    138.110498
+   ],
+   "modulation": "unmodulated carriers (recording: < 25 Hz wide, steady envelope)"
+  }
+ },
+ "humps": {
+  "waterfall_1790507202.raw": {
+   "comb": {
+    "fraction_on": 0.049421,
+    "episodes": 36,
+    "episodes_per_hour": 1.504976,
+    "duration_s_p10_p50_p90": [
+     29.9008,
+     69.768533,
+     199.338667
+    ],
+    "spacing_hz_p10_p50_p90": [
+     124302.455357,
+     145019.53125,
+     149697.580645
+    ],
+    "amplitude_db_p10_p50_p90": [
+     0.108011,
+     0.132043,
+     0.20173
+    ],
+    "wander_hz_s_p50_p90": [
+     1278.299823,
+     3223.662357
+    ]
+   },
+   "wandering_lines": [
+    {
+     "start_step": 628,
+     "duration_s": 956.8256,
+     "f_min_mhz": 138.084497,
+     "f_max_mhz": 138.106763,
+     "amplitude_db": 0.668779,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1439,
+     "duration_s": 1315.6352,
+     "f_min_mhz": 137.701294,
+     "f_max_mhz": 137.701294,
+     "amplitude_db": 0.218774,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 1447,
+     "duration_s": 1235.899733,
+     "f_min_mhz": 137.806763,
+     "f_max_mhz": 137.807935,
+     "amplitude_db": 0.20889,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 1437,
+     "duration_s": 1794.048,
+     "f_min_mhz": 136.079419,
+     "f_max_mhz": 136.079419,
+     "amplitude_db": 0.365986,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 1473,
+     "duration_s": 1435.2384,
+     "f_min_mhz": 137.451685,
+     "f_max_mhz": 137.456372,
+     "amplitude_db": 0.335553,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 1487,
+     "duration_s": 1295.701333,
+     "f_min_mhz": 137.652075,
+     "f_max_mhz": 137.652075,
+     "amplitude_db": 0.212392,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 1522,
+     "duration_s": 946.858667,
+     "f_min_mhz": 137.281763,
+     "f_max_mhz": 137.284106,
+     "amplitude_db": 0.4285,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 1708,
+     "duration_s": 916.957867,
+     "f_min_mhz": 136.115747,
+     "f_max_mhz": 136.119263,
+     "amplitude_db": 0.71867,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1654,
+     "duration_s": 1475.106133,
+     "f_min_mhz": 138.044653,
+     "f_max_mhz": 138.069263,
+     "amplitude_db": 0.285613,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1697,
+     "duration_s": 1205.998933,
+     "f_min_mhz": 137.040356,
+     "f_max_mhz": 137.053247,
+     "amplitude_db": 0.42328,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1720,
+     "duration_s": 1295.701333,
+     "f_min_mhz": 136.825903,
+     "f_max_mhz": 136.845825,
+     "amplitude_db": 0.315915,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 2064,
+     "duration_s": 956.8256,
+     "f_min_mhz": 136.079419,
+     "f_max_mhz": 136.079419,
+     "amplitude_db": 0.204427,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 2112,
+     "duration_s": 2960.1792,
+     "f_min_mhz": 138.046997,
+     "f_max_mhz": 138.127856,
+     "amplitude_db": 0.395494,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 2871,
+     "duration_s": 1505.006933,
+     "f_min_mhz": 138.096216,
+     "f_max_mhz": 138.1302,
+     "amplitude_db": 0.409725,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 3181,
+     "duration_s": 1594.709333,
+     "f_min_mhz": 138.099731,
+     "f_max_mhz": 138.146606,
+     "amplitude_db": 0.694344,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 3535,
+     "duration_s": 1315.6352,
+     "f_min_mhz": 137.089575,
+     "f_max_mhz": 137.130591,
+     "amplitude_db": 0.248089,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 3365,
+     "duration_s": 3199.3856,
+     "f_min_mhz": 138.088013,
+     "f_max_mhz": 138.147778,
+     "amplitude_db": 0.490173,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 3740,
+     "duration_s": 1724.279467,
+     "f_min_mhz": 137.135278,
+     "f_max_mhz": 137.154028,
+     "amplitude_db": 0.422926,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 4038,
+     "duration_s": 3229.2864,
+     "f_min_mhz": 137.032153,
+     "f_max_mhz": 137.128247,
+     "amplitude_db": 0.235997,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 4251,
+     "duration_s": 1116.296533,
+     "f_min_mhz": 136.829419,
+     "f_max_mhz": 136.877466,
+     "amplitude_db": 0.241936,
+     "wander_hz_s_p50": 235.152571
+    },
+    {
+     "start_step": 3945,
+     "duration_s": 5780.821333,
+     "f_min_mhz": 138.046997,
+     "f_max_mhz": 138.147778,
+     "amplitude_db": 0.615015,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 4653,
+     "duration_s": 1046.528,
+     "f_min_mhz": 138.132544,
+     "f_max_mhz": 138.147778,
+     "amplitude_db": 0.629013,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 5044,
+     "duration_s": 1076.4288,
+     "f_min_mhz": 138.141919,
+     "f_max_mhz": 138.147778,
+     "amplitude_db": 0.567901,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 5069,
+     "duration_s": 1425.271467,
+     "f_min_mhz": 137.124731,
+     "f_max_mhz": 137.144653,
+     "amplitude_db": 0.304832,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 5742,
+     "duration_s": 1016.6272,
+     "f_min_mhz": 137.47395,
+     "f_max_mhz": 137.482153,
+     "amplitude_db": 0.271878,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 5271,
+     "duration_s": 5880.490667,
+     "f_min_mhz": 138.07981,
+     "f_max_mhz": 138.139575,
+     "amplitude_db": 0.489369,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 5713,
+     "duration_s": 1544.874667,
+     "f_min_mhz": 137.671997,
+     "f_max_mhz": 137.68606,
+     "amplitude_db": 0.420868,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 6009,
+     "duration_s": 1873.783467,
+     "f_min_mhz": 138.075122,
+     "f_max_mhz": 138.114966,
+     "amplitude_db": 0.39426,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 6351,
+     "duration_s": 1285.7344,
+     "f_min_mhz": 137.639185,
+     "f_max_mhz": 137.652075,
+     "amplitude_db": 0.19092,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 6555,
+     "duration_s": 1215.965867,
+     "f_min_mhz": 136.678247,
+     "f_max_mhz": 136.709888,
+     "amplitude_db": 0.185958,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 6479,
+     "duration_s": 4096.4096,
+     "f_min_mhz": 138.052856,
+     "f_max_mhz": 138.129028,
+     "amplitude_db": 0.676859,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 6723,
+     "duration_s": 2093.056,
+     "f_min_mhz": 136.829419,
+     "f_max_mhz": 136.877466,
+     "amplitude_db": 0.245394,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 8548,
+     "duration_s": 916.957867,
+     "f_min_mhz": 138.070435,
+     "f_max_mhz": 138.097388,
+     "amplitude_db": 0.822655,
+     "wander_hz_s_p50": 117.576286
+    }
+   ]
+  },
+  "waterfall_1792835688.raw": {
+   "comb": {
+    "fraction_on": 0.071991,
+    "episodes": 61,
+    "episodes_per_hour": 2.550099,
+    "duration_s_p10_p50_p90": [
+     29.9008,
+     49.834667,
+     159.470933
+    ],
+    "spacing_hz_p10_p50_p90": [
+     80010.775862,
+     80941.133721,
+     149697.580645
+    ],
+    "amplitude_db_p10_p50_p90": [
+     0.10897,
+     0.144774,
+     0.289776
+    ],
+    "wander_hz_s_p50_p90": [
+     796.945704,
+     3089.498493
+    ]
+   },
+   "wandering_lines": [
+    {
+     "start_step": 239,
+     "duration_s": 1235.899733,
+     "f_min_mhz": 138.030591,
+     "f_max_mhz": 138.07395,
+     "amplitude_db": 0.359346,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 754,
+     "duration_s": 946.858667,
+     "f_min_mhz": 138.034106,
+     "f_max_mhz": 138.045825,
+     "amplitude_db": 0.989706,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1084,
+     "duration_s": 916.957867,
+     "f_min_mhz": 138.046997,
+     "f_max_mhz": 138.064575,
+     "amplitude_db": 0.24382,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1079,
+     "duration_s": 1146.197333,
+     "f_min_mhz": 137.233716,
+     "f_max_mhz": 137.251294,
+     "amplitude_db": 0.224913,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 1200,
+     "duration_s": 2392.064,
+     "f_min_mhz": 136.256372,
+     "f_max_mhz": 136.264575,
+     "amplitude_db": 0.476747,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 2160,
+     "duration_s": 1136.2304,
+     "f_min_mhz": 136.358325,
+     "f_max_mhz": 136.364185,
+     "amplitude_db": 0.315416,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 3447,
+     "duration_s": 2780.7744,
+     "f_min_mhz": 136.333716,
+     "f_max_mhz": 136.345435,
+     "amplitude_db": 0.418225,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 6637,
+     "duration_s": 1156.164267,
+     "f_min_mhz": 136.577466,
+     "f_max_mhz": 136.583325,
+     "amplitude_db": 0.284668,
+     "wander_hz_s_p50": 117.576286
+    },
+    {
+     "start_step": 6660,
+     "duration_s": 936.891733,
+     "f_min_mhz": 137.652075,
+     "f_max_mhz": 137.652075,
+     "amplitude_db": 0.315407,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 6660,
+     "duration_s": 976.759467,
+     "f_min_mhz": 137.807935,
+     "f_max_mhz": 137.813794,
+     "amplitude_db": 0.276243,
+     "wander_hz_s_p50": 0.0
+    },
+    {
+     "start_step": 6826,
+     "duration_s": 1534.907733,
+     "f_min_mhz": 136.278638,
+     "f_max_mhz": 136.291528,
+     "amplitude_db": 0.901291,
+     "wander_hz_s_p50": 0.0
+    }
+   ]
+  },
+  "baseband_137000000Hz_19-39-00_01-11-2026.wav": {
+   "comb": {
+    "fraction_on": 0.571429,
+    "episodes": 8,
+    "episodes_per_hour": 25.799596,
+    "duration_s_p10_p50_p90": [
+     36.877653,
+     54.818133,
+     112.626347
+    ],
+    "spacing_hz_p10_p50_p90": [
+     80473.265896,
+     80473.265896,
+     80941.133721
+    ],
+    "amplitude_db_p10_p50_p90": [
+     0.13632,
+     0.24157,
+     0.325817
+    ],
+    "wander_hz_s_p50_p90": [
+     1211.251499,
+     2419.199668
+    ]
+   },
+   "note": "after 445 s"
+  }
+ },
+ "meteor_cal": {
+  "file": "meteor_cal.json",
+  "C_db": 148.773433,
+  "residual_rms_db": 3.651341,
+  "p_tx_dbw_at_t_ant_500": -1.189767
+ },
+ "orbcomm_ref": {
+  "file": "orbcomm_ref.json",
+  "satellite": {
+   "norad": 41188,
+   "name": "ORBCOMM FM117"
+  },
+  "alpha": [
+   0.40507,
+   0.406198
+  ],
+  "symbol_rate_hz": [
+   4800.108915,
+   4800.109042
+  ],
+  "doppler_residual_rms_hz": [
+   0.905321,
+   0.88619
+  ]
+ },
+ "bank": {
+  "dir": "bank",
+  "clips": 26,
+  "committed": false
+ },
+ "events": {
+  "file": "out/profile/events.csv",
+  "by_auto_label": {
+   "am": 2501,
+   "birdie": 9062,
+   "carrier_138": 829,
+   "lora": 731,
+   "meteor": 31,
+   "unknown": 92,
+   "unknown_sat": 241,
+   "usb_hump": 72,
+   "vdl": 66722
+  }
+ }
+}

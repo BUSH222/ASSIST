@@ -4,8 +4,7 @@
 (RTL-SDR v3 at 137.000 MHz) and serves it over rtl_tcp or writes it to files, so that
 ADRIFT can be tested against a sky whose content is known exactly.
 
-- Implementation plan: [`samples/plan.md`](samples/plan.md)
-- Progress, findings and decisions per milestone: [`checkpoint.md`](checkpoint.md)
+The implementation plan (`samples/plan.md`) and the per-milestone `checkpoint.md` are kept locally, not in git.
 
 Status: M0 (skeleton). The `assist` CLI has no commands yet.
 
@@ -26,5 +25,5 @@ uv run pytest
 - **`ASSIST_NATIVE=ON uv sync --reinstall-package assist`** builds with `-march=native` (local use only);
   a plain `uv sync --reinstall-package assist` switches back.
 
-Large local data (recordings, waterfalls, element snapshots) lives in `samples/`, which is gitignored except for
-the plan. Tests never need it.
+Large local data (recordings, waterfalls, element snapshots) lives in `samples/`, which is gitignored; tests never
+need it. Tool outputs go to `out/`, one-off temporary files to `temp/` (both gitignored).

@@ -1,0 +1,564 @@
+{
+ "method": "P10: METEOR level calibration from the waterfall days (perfect horizon).\n\nPer row of each non-overlapping METEOR pass: SNR in 137.9 +- 50 kHz = (signal power in the band) / (noise power in\nthe band), the noise being the same bins' baseline from rows 5-15 min outside the pass. Rows where pixels saturate\n(255, i.e. +25 dB over the file's calibration mean) use a fit of the LRPT spectrum (raised cosine, 72 kS/s,\nalpha 0.6, shifted by the predicted Doppler) to the unsaturated bins instead of the plain sum.\nModel: SNR_dB = C + G(off-nadir) + G(90 - el) - FSPL(R, f) with the QFH polynomial at both ends (plan \u00a76.2), fitted\nas 10*log10(1 + SNR) to the measured excess. C = P_tx + 30 - 10*log10(1000 k T_sys B) [dB]; only C is identifiable\nfrom SNR, so P_tx is reported for an assumed T_sys (T_ant + receiver chain, \u00a74.3).\n",
+ "passes_measured": 40,
+ "passes_used_max_el_gt_5": 29,
+ "fit_per_satellite": {
+  "METEOR-M2 3": {
+   "C_db": 147.736282,
+   "rows": 9771,
+   "residual_rms_db": 3.578916
+  },
+  "METEOR-M2 4": {
+   "C_db": 149.738951,
+   "rows": 9994,
+   "residual_rms_db": 3.535676
+  }
+ },
+ "fit_both": {
+  "C_db": 148.773433,
+  "rows": 19765,
+  "residual_rms_db": 3.651341
+ },
+ "residual_tables": {
+  "el_bins": [
+   [
+    0,
+    2114,
+    -1.270752,
+    3.850756
+   ],
+   [
+    5,
+    4615,
+    -0.619548,
+    4.317042
+   ],
+   [
+    10,
+    3583,
+    0.828994,
+    4.645318
+   ],
+   [
+    15,
+    3196,
+    -0.097079,
+    4.929971
+   ],
+   [
+    20,
+    1715,
+    1.009393,
+    4.70091
+   ],
+   [
+    25,
+    697,
+    3.308955,
+    4.424135
+   ],
+   [
+    30,
+    642,
+    1.148755,
+    3.897227
+   ],
+   [
+    35,
+    345,
+    2.2945,
+    3.352161
+   ],
+   [
+    40,
+    307,
+    2.912304,
+    3.533454
+   ],
+   [
+    45,
+    286,
+    2.441499,
+    3.083871
+   ],
+   [
+    50,
+    301,
+    1.194143,
+    3.159733
+   ],
+   [
+    55,
+    227,
+    -0.054707,
+    2.827943
+   ],
+   [
+    60,
+    148,
+    1.015863,
+    3.063848
+   ],
+   [
+    65,
+    144,
+    1.255849,
+    2.646571
+   ],
+   [
+    70,
+    151,
+    1.043387,
+    2.251853
+   ],
+   [
+    75,
+    172,
+    0.570413,
+    1.815074
+   ],
+   [
+    80,
+    81,
+    1.043943,
+    1.776874
+   ],
+   [
+    85,
+    21,
+    -2.454334,
+    1.586037
+   ]
+  ],
+  "az_bins": [
+   [
+    0,
+    3126,
+    2.79923,
+    4.133407
+   ],
+   [
+    30,
+    1761,
+    1.069699,
+    4.236994
+   ],
+   [
+    60,
+    1061,
+    0.589871,
+    4.233237
+   ],
+   [
+    90,
+    940,
+    -0.181101,
+    3.955909
+   ],
+   [
+    120,
+    951,
+    1.407068,
+    4.402804
+   ],
+   [
+    150,
+    1373,
+    2.089798,
+    3.636728
+   ],
+   [
+    180,
+    1152,
+    1.462551,
+    4.578644
+   ],
+   [
+    210,
+    1139,
+    -3.983098,
+    3.647356
+   ],
+   [
+    240,
+    1151,
+    -2.418468,
+    3.237856
+   ],
+   [
+    270,
+    1299,
+    -1.091168,
+    3.999166
+   ],
+   [
+    300,
+    1856,
+    -0.551161,
+    3.854249
+   ],
+   [
+    330,
+    2936,
+    -0.522307,
+    4.751935
+   ]
+  ]
+ },
+ "edges_s": {
+  "rise_minus_aos_p10_p50_p90": [
+   31.732198,
+   56.237146,
+   127.909814
+  ],
+  "los_minus_fall_p10_p50_p90": [
+   49.346172,
+   104.872312,
+   225.190114
+  ]
+ },
+ "band_power_fraction": 0.994708,
+ "saw_loss_db_137_9": 1.465,
+ "p_tx_dbw_for_t_ant": {
+  "300": {
+   "t_sys_k": 526.595189,
+   "both": -2.587924,
+   "METEOR-M2 3": -3.625075,
+   "METEOR-M2 4": -1.622405
+  },
+  "500": {
+   "t_sys_k": 726.595189,
+   "both": -1.189767,
+   "METEOR-M2 3": -2.226918,
+   "METEOR-M2 4": -0.224249
+  },
+  "1000": {
+   "t_sys_k": 1226.595189,
+   "both": 1.08432,
+   "METEOR-M2 3": 0.047169,
+   "METEOR-M2 4": 2.049839
+  }
+ },
+ "passes": [
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-27T11:41:32.359Z",
+   "max_el_deg": 2.91806,
+   "rows": 407,
+   "saturated_rows": 0,
+   "peak_snr_db": 6.487222
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-27T13:18:50.744Z",
+   "max_el_deg": 2.474808,
+   "rows": 378,
+   "saturated_rows": 0,
+   "peak_snr_db": 1.077963
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-27T14:54:00.579Z",
+   "max_el_deg": 9.464641,
+   "rows": 653,
+   "saturated_rows": 0,
+   "peak_snr_db": 14.238313
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-27T16:30:40.084Z",
+   "max_el_deg": 32.049093,
+   "rows": 870,
+   "saturated_rows": 3,
+   "peak_snr_db": 17.194227
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-27T18:09:56.754Z",
+   "max_el_deg": 58.605493,
+   "rows": 923,
+   "saturated_rows": 254,
+   "peak_snr_db": 22.324287
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-27T19:52:40.463Z",
+   "max_el_deg": 11.68484,
+   "rows": 725,
+   "saturated_rows": 0,
+   "peak_snr_db": 7.655227
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-28T04:39:23.747Z",
+   "max_el_deg": 4.76919,
+   "rows": 529,
+   "saturated_rows": 0,
+   "peak_snr_db": 5.736323
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-28T06:18:05.434Z",
+   "max_el_deg": 32.726291,
+   "rows": 886,
+   "saturated_rows": 0,
+   "peak_snr_db": 16.881311
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-28T07:58:05.655Z",
+   "max_el_deg": 53.312945,
+   "rows": 910,
+   "saturated_rows": 223,
+   "peak_snr_db": 23.956778
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-09-28T09:38:21.747Z",
+   "max_el_deg": 14.679555,
+   "rows": 746,
+   "saturated_rows": 0,
+   "peak_snr_db": 12.906346
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-27T11:11:09.674Z",
+   "max_el_deg": 77.781272,
+   "rows": 931,
+   "saturated_rows": 213,
+   "peak_snr_db": 23.920795
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-27T12:52:28.772Z",
+   "max_el_deg": 22.564032,
+   "rows": 849,
+   "saturated_rows": 0,
+   "peak_snr_db": 18.871666
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-27T14:39:18.409Z",
+   "max_el_deg": 1.207438,
+   "rows": 289,
+   "saturated_rows": 0,
+   "peak_snr_db": 4.836702
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-27T23:20:26.034Z",
+   "max_el_deg": 17.82897,
+   "rows": 808,
+   "saturated_rows": 0,
+   "peak_snr_db": 16.291021
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-28T01:00:15.600Z",
+   "max_el_deg": 85.147527,
+   "rows": 930,
+   "saturated_rows": 292,
+   "peak_snr_db": 23.999253
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-28T02:40:34.023Z",
+   "max_el_deg": 23.77017,
+   "rows": 834,
+   "saturated_rows": 0,
+   "peak_snr_db": 14.568389
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-28T04:20:51.468Z",
+   "max_el_deg": 7.105528,
+   "rows": 591,
+   "saturated_rows": 0,
+   "peak_snr_db": 5.332118
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-28T06:00:09.885Z",
+   "max_el_deg": 2.188981,
+   "rows": 359,
+   "saturated_rows": 0,
+   "peak_snr_db": 0.170062
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-28T07:36:17.373Z",
+   "max_el_deg": 4.442252,
+   "rows": 490,
+   "saturated_rows": 0,
+   "peak_snr_db": 6.815177
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-09-28T09:11:56.366Z",
+   "max_el_deg": 15.527633,
+   "rows": 760,
+   "saturated_rows": 0,
+   "peak_snr_db": 11.10032
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-24T11:14:03.475Z",
+   "max_el_deg": 4.153729,
+   "rows": 474,
+   "saturated_rows": 0,
+   "peak_snr_db": 5.854187
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-24T12:52:21.907Z",
+   "max_el_deg": 1.852701,
+   "rows": 330,
+   "saturated_rows": 0,
+   "peak_snr_db": 2.958738
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-24T14:27:37.008Z",
+   "max_el_deg": 6.630317,
+   "rows": 573,
+   "saturated_rows": 0,
+   "peak_snr_db": 9.966305
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-24T16:03:41.649Z",
+   "max_el_deg": 22.79285,
+   "rows": 822,
+   "saturated_rows": 0,
+   "peak_snr_db": 8.702909
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-24T17:42:12.667Z",
+   "max_el_deg": 88.188654,
+   "rows": 926,
+   "saturated_rows": 188,
+   "peak_snr_db": 20.718299
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-24T19:23:52.216Z",
+   "max_el_deg": 18.431862,
+   "rows": 811,
+   "saturated_rows": 0,
+   "peak_snr_db": 8.963498
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-25T04:13:27.821Z",
+   "max_el_deg": 0.761316,
+   "rows": 230,
+   "saturated_rows": 0,
+   "peak_snr_db": -3.231422
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-25T05:50:34.219Z",
+   "max_el_deg": 21.5336,
+   "rows": 833,
+   "saturated_rows": 0,
+   "peak_snr_db": 15.735479
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-25T07:30:24.136Z",
+   "max_el_deg": 79.784203,
+   "rows": 921,
+   "saturated_rows": 245,
+   "peak_snr_db": 23.028533
+  },
+  {
+   "name": "METEOR-M2 3",
+   "aos_utc": "2026-10-25T09:10:38.720Z",
+   "max_el_deg": 20.093577,
+   "rows": 801,
+   "saturated_rows": 0,
+   "peak_snr_db": 13.88333
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-24T11:27:00.971Z",
+   "max_el_deg": 84.09839,
+   "rows": 930,
+   "saturated_rows": 169,
+   "peak_snr_db": 24.879136
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-24T13:08:53.944Z",
+   "max_el_deg": 17.562327,
+   "rows": 806,
+   "saturated_rows": 0,
+   "peak_snr_db": 15.584769
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-24T21:58:41.232Z",
+   "max_el_deg": 1.155801,
+   "rows": 281,
+   "saturated_rows": 0,
+   "peak_snr_db": 1.010051
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-24T23:36:11.924Z",
+   "max_el_deg": 22.559824,
+   "rows": 842,
+   "saturated_rows": 0,
+   "peak_snr_db": 19.206789
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-25T01:16:08.991Z",
+   "max_el_deg": 76.688992,
+   "rows": 923,
+   "saturated_rows": 208,
+   "peak_snr_db": 24.248921
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-25T02:56:29.291Z",
+   "max_el_deg": 19.578884,
+   "rows": 799,
+   "saturated_rows": 0,
+   "peak_snr_db": 13.6255
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-25T04:36:44.675Z",
+   "max_el_deg": 5.68816,
+   "rows": 541,
+   "saturated_rows": 0,
+   "peak_snr_db": 5.966676
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-25T06:15:42.286Z",
+   "max_el_deg": 1.967667,
+   "rows": 340,
+   "saturated_rows": 0,
+   "peak_snr_db": -1.922824
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-25T07:51:25.900Z",
+   "max_el_deg": 5.333637,
+   "rows": 528,
+   "saturated_rows": 0,
+   "peak_snr_db": 9.121461
+  },
+  {
+   "name": "METEOR-M2 4",
+   "aos_utc": "2026-10-25T09:27:17.850Z",
+   "max_el_deg": 18.469842,
+   "rows": 790,
+   "saturated_rows": 0,
+   "peak_snr_db": 4.533741
+  }
+ ]
+}
