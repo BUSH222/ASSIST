@@ -1,0 +1,12 @@
+# Zombie satellite (plan §6.5): an unmodulated carrier keyed 40 s on / 180 s off, tumbling AM, and an oscillator
+# with a per-pass offset and a linear in-pass drift. `freq_hz` is required (a number or a random expression).
+# AM and level defaults are the plan's Appendix A example values.
+platform: satellite
+emitters:
+  - id: carrier
+    signal: {kind: cw}
+    oscillator: {pass_offset_sigma_hz: 50, drift_hz_s: 0.2}
+    schedule: {type: on_off, on_s: 40, off_s: 180, ramp_ms: 5}
+    am: {period_s: 7.5, depth_db: 6}
+    level: {cn0_zenith_dbhz: 45}
+    pattern: qfh_poly

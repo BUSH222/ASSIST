@@ -1,4 +1,4 @@
-"""Profile pass helper: OMM reading, time conversion, geometry and passes.
+"""Pass helper used by the profile tool (now in assist.orbits): OMM reading, time conversion, geometry, passes.
 
 Uses tests/fixtures/omm_2026-11-02.csv (public elements from the 2026-11-02 retlector snapshots) and the plan's
 rounded station position, so no local data is needed.
@@ -11,24 +11,26 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from assist.profile import passes
-from assist.profile.station import Station, load_station
+from assist import timebase
+from assist.orbits import elements
+from assist.orbits import geometry as passes
+from assist.station import Station, load_station
 
 FIXTURE = Path(__file__).parent / "fixtures" / "omm_2026-11-02.csv"
-STATION = Station(55.5, 37.1, 180.0)
+STATION = Station(55.5, 37.1, 172.0)
 REC_START = dt.datetime(2026, 11, 1, 16, 39, tzinfo=dt.UTC).timestamp()  # the station recording
 FM117, METEOR_M2_3 = 41188, 57166
 
 
 @pytest.fixture(scope="module")
 def els() -> dict[int, dict[str, str]]:
-    return passes.load_elements([FIXTURE])
+    return elements.load_newest([FIXTURE])
 
 
 def test_unix_to_time_is_exact_across_leap_seconds() -> None:
     u = np.array([REC_START, REC_START + 0.25, 1483228799.0, 1483228800.0, 946684800.5])
-    t = passes.unix_to_time(u)
-    ref = passes.timescale().from_datetimes([dt.datetime.fromtimestamp(x, dt.UTC) for x in u])
+    t = timebase.unix_to_time(u)
+    ref = timebase.timescale().from_datetimes([dt.datetime.fromtimestamp(x, dt.UTC) for x in u])
     np.testing.assert_allclose((t.tt - ref.tt) * 86400, 0, atol=1e-5)
 
 
@@ -44,12 +46,12 @@ def test_columns_by_name(tmp_path: Path) -> None:
     shuffled = tmp_path / "shuffled.csv"
     with shuffled.open("w", newline="") as f:
         csv.writer(f).writerows([[r[i] for i in order] for r in rows])
-    assert passes.load_elements([shuffled]) == passes.load_elements([FIXTURE])
+    assert elements.load_newest([shuffled]) == elements.load_newest([FIXTURE])
     missing = tmp_path / "missing.csv"
     with missing.open("w", newline="") as f:
         csv.writer(f).writerows([r[1:] for r in rows])
     with pytest.raises(ValueError, match="OBJECT_NAME"):
-        passes.read_omm_csv(missing)
+        elements.read_omm_csv(missing)
 
 
 def test_range_rate_is_derivative_of_range(els: dict[int, dict[str, str]]) -> None:
@@ -81,7 +83,7 @@ def test_passes_over_a_day(els: dict[int, dict[str, str]]) -> None:
 def test_load_station(tmp_path: Path) -> None:
     a = tmp_path / "a.yaml"
     a.write_text("station_lat: 55.5\nstation_lon: 37.1\n")
-    assert load_station(a) == Station(55.5, 37.1, 180.0, "+03:00")
+    assert load_station(a) == Station(55.5, 37.1, 172.0, "+03:00")
     b = tmp_path / "b.yaml"
     b.write_text("lat: 1\nlon: 2\nalt_m: 3\ntz: '+00:00'\n")
     assert load_station(b) == Station(1.0, 2.0, 3.0, "+00:00")

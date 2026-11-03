@@ -15,14 +15,15 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from assist import waterfall as wf
+from assist.orbits.elements import load_newest
+from assist.orbits.geometry import find_passes
 from assist.profile import adc, birdies, humps, labels, meteor_cal, mirror, noise, occupancy, orbcomm
 from assist.profile.annotations import excluded_ranges, keep_mask, load_annotations
 from assist.profile.bank import Bank, strongest_bursts
 from assist.profile.cache import day_summary, wav_rows
-from assist.profile.passes import find_passes, load_elements
 from assist.profile.rawio import RawWaterfall, open_raw
-from assist.profile.station import load_station
 from assist.profile.wavio import Recording
+from assist.station import load_station
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -98,7 +99,7 @@ def build(
     cache = work_dir / "cache"
     st = load_station(station_path)
     ann = load_annotations(list(annotation_paths))
-    els = load_elements(list(element_paths))
+    els = load_newest(list(element_paths))
     rec = Recording(wav, tz=st.tz)
     raws = [open_raw(p) for p in sorted(raw_paths)]
     f = wf.bin_freqs(FC)
@@ -465,6 +466,15 @@ def build(
     log("P2b: ORBCOMM reference; P11: bank")
     bank = Bank(out_dir / "bank")
     orb = _orbcomm(rec, ann, rows, f, els, st, bank)
+    if orb.get("channels"):
+        f_orb = float(np.mean([c["channel_centre_hz"] for c in orb["channels"]]))
+        orb["level"] = orbcomm.fit_level(
+            orb["channels"],
+            rec.start_unix + float(orb["segment_s"][0]),
+            els[orb["satellite"]["norad"]],
+            st,
+            -saw[min(saw, key=lambda k: abs(k - f_orb))],
+        )
     _write_json(out_dir / "orbcomm_ref.json", orb)
     prof["orbcomm_ref"] = {
         "file": "orbcomm_ref.json",
@@ -472,6 +482,7 @@ def build(
         "alpha": [c["pulse"]["alpha"] for c in orb.get("channels", [])],
         "symbol_rate_hz": [c["symbol_rate_hz"] for c in orb.get("channels", [])],
         "doppler_residual_rms_hz": [c["doppler"]["residual_rms_hz"] for c in orb.get("channels", [])],
+        "link_const_dbhz": orb["level"]["link_const_dbhz"] if "level" in orb else None,
     }
     _bank_bursts(rec, bank, starts, power, chans, vdl_active, rows, f)
     bank.write_index()

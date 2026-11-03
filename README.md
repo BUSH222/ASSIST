@@ -6,7 +6,25 @@ ADRIFT can be tested against a sky whose content is known exactly.
 
 The implementation plan (`samples/plan.md`) and the per-milestone `checkpoint.md` are kept locally, not in git.
 
-Status: M0 (skeleton). The `assist` CLI has no commands yet.
+Status: M2 (scenario and sky). Scenarios resolve to a self-contained document, and the truth (frequencies,
+Doppler, geometry, levels, events) can be computed; IQ rendering arrives in M3.
+
+## Usage
+
+```sh
+uv run assist validate scenarios/example.yaml                 # load, draw, validate, resolve
+uv run assist resolve  scenarios/example.yaml -o out/resolved.json
+uv run assist passes   scenarios/example.yaml --to +6h        # pass table of all satellite sources
+uv run assist truth    scenarios/example.yaml -o out/truth.csv --to +2h [--step 1s] [--format jsonl]
+uv run assist catalog  scenarios/example.yaml -o out/catalog.tle   # element sets ADRIFT is given
+uv run assist schema                                          # JSON Schema of a scenario
+uv run assist elements fetch                                  # network: dated retlector.eu snapshots
+uv run assist profile  build | labels | report                # data survey of samples/ (M1)
+```
+
+Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`). The
+station position is read from `samples/station.yaml` when present; otherwise the rounded position
+(55.5 N, 37.1 E, 172 m) is used.
 
 ## Development
 

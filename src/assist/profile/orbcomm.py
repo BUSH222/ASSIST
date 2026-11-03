@@ -14,12 +14,13 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy.signal import welch
 
+from assist.emitters.link import fspl_db, p_tx_from_link_const, qfh_gain_db, t_sys_k
+from assist.orbits.geometry import C_M_S, geometry
 from assist.profile.dsp import channelize, rc_psd
-from assist.profile.passes import C_M_S, geometry
 
 if TYPE_CHECKING:
-    from assist.profile.station import Station
     from assist.profile.wavio import Recording
+    from assist.station import Station
 
 RATE = 50_000
 DECIM = 48  # 2.4 MS/s -> 50 kS/s
@@ -243,6 +244,60 @@ def analyse(
             "f_hz": fr[keep][::4].tolist(),
             "psd_db": (10 * np.log10(p[keep][::4] / noise_d)).tolist(),
             "model_db": (10 * np.log10(model[keep][::4] / noise_d)).tolist(),
+        },
+    }
+
+
+def fit_level(
+    channels: list[dict[str, Any]],
+    t0_unix: float,
+    row: dict[str, str],
+    station: Station,
+    saw_loss_db: float,
+    max_residual_hz: float = 5.0,
+) -> dict[str, Any]:
+    """Transmit level from the per-block C/N0, with the simulator's link model (plan §6.2).
+
+    Path gain = QFH(off-nadir) + QFH(90 - el) - FSPL(range, f): the QFH pattern at both ends, perfect horizon.
+    Per channel, the link constant is the median of C/N0 - path gain over blocks where the carrier is tracked
+    (|Doppler residual| < max_residual_hz), the satellite is above the horizon and C/N0 is finite. The median
+    keeps the deep fade 90 s into the segment from biasing it. P_tx = link constant + 10 log10(k T_sys).
+    """
+    per = []
+    for ch in channels:
+        s = ch["series"]
+        t = t0_unix + np.asarray(s["t_s"], dtype=np.float64)
+        cn0 = np.array([np.nan if v is None else v for v in s["cn0_dbhz"]], dtype=np.float64)
+        resid = np.asarray(s["residual_hz"], dtype=np.float64)
+        g = geometry(row, station, t)
+        f_hz = float(ch["doppler"]["rest_freq_hz"])
+        path = qfh_gain_db(g.off_nadir_deg) + qfh_gain_db(90.0 - g.el_deg) - fspl_db(g.range_m, f_hz)
+        ok = np.isfinite(cn0) & (np.abs(resid) < max_residual_hz) & (g.el_deg >= 0)
+        k = cn0[ok] - path[ok]
+        med = float(np.median(k))
+        per.append(
+            {
+                "channel_hz": f_hz,
+                "link_const_dbhz": med,
+                "blocks_used": int(ok.sum()),
+                "residual_rms_db": float(np.sqrt(np.mean((k - med) ** 2))),
+                "residual_p10_p90_db": [float(v) for v in np.percentile(k - med, [10, 90])],
+                "el_deg_range": [float(g.el_deg[ok].min()), float(g.el_deg[ok].max())],
+                "off_nadir_deg_range": [float(g.off_nadir_deg[ok].min()), float(g.off_nadir_deg[ok].max())],
+            }
+        )
+    link_const = float(np.mean([c["link_const_dbhz"] for c in per]))
+    return {
+        "method": fit_level.__doc__,
+        "per_channel": per,
+        "link_const_dbhz": link_const,
+        "saw_loss_db": saw_loss_db,
+        "p_tx_dbw_for_t_ant": {
+            str(t_ant): {
+                "t_sys_k": t_sys_k(t_ant, saw_loss_db),
+                "p_tx_dbw": p_tx_from_link_const(link_const, t_sys_k(t_ant, saw_loss_db)),
+            }
+            for t_ant in (300, 500, 1000)
         },
     }
 

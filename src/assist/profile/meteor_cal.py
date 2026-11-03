@@ -16,32 +16,18 @@ import numpy as np
 from scipy.optimize import least_squares
 
 from assist import waterfall as wf
+from assist.emitters.link import K_BOLTZ, QFH_COEFFS_DB, fspl_db, qfh_gain_db, t_sys_k
+from assist.orbits.geometry import Pass, find_passes, geometry
 from assist.profile.cache import centred_lut
 from assist.profile.dsp import rc_psd
-from assist.profile.passes import Pass, find_passes, geometry
 
 if TYPE_CHECKING:
     from assist.profile.rawio import RawWaterfall
-    from assist.profile.station import Station
+    from assist.station import Station
 
-QFH_COEFFS_DB = (3.369124522, 1.975440866e-2, -7.573492347e-4, -3.624644995e-6)  # plan §6.2
 F_METEOR = 137.9e6
 HALF_BW = 50e3
 R_EARTH = 6_371_000.0
-K_BOLTZ = 1.380649e-23
-
-
-def qfh_gain_db(x_deg: np.ndarray) -> np.ndarray:
-    """QFH gain (dBi) vs off-boresight angle; clamped to the 90 deg value outside 0..90 (plan §6.2)."""
-    x = np.asarray(x_deg, dtype=np.float64)
-    c0, c1, c2, c3 = QFH_COEFFS_DB
-    g = c0 + c1 * x + c2 * x**2 + c3 * x**3
-    g90 = c0 + c1 * 90 + c2 * 90**2 + c3 * 90**3
-    return np.where((x < 0) | (x > 90), g90, g)
-
-
-def fspl_db(range_m: np.ndarray, f_hz: float) -> np.ndarray:
-    return 20 * np.log10(4 * np.pi * np.asarray(range_m) * f_hz / 299_792_458.0)
 
 
 def off_nadir_deg(el_deg: np.ndarray, range_m: np.ndarray, station_alt_m: float) -> np.ndarray:
@@ -172,16 +158,6 @@ def residual_table(passes: list[PassData], c_db: float, station: Station, min_el
     return out
 
 
-def t_sys_k(
-    t_ant_k: float, saw_loss_db: float, lna_nf_db: float = 1.0, lna_gain_db: float = 20.0, tuner_nf_db: float = 3.5
-) -> float:
-    """System temperature referred to the antenna (plan §4.3)."""
-    l_saw = 10 ** (saw_loss_db / 10)
-    t_lna = 290 * (10 ** (lna_nf_db / 10) - 1)
-    t_tun = 290 * (10 ** (tuner_nf_db / 10) - 1)
-    return float(t_ant_k + (l_saw - 1) * 290 + l_saw * t_lna + l_saw * t_tun / 10 ** (lna_gain_db / 10))
-
-
 def p_tx_dbw(c_db: float, t_sys: float, band_hz: float = 2 * HALF_BW, band_fraction: float = 1.0) -> float:
     """P_tx (dBW) from C for a given T_sys; band_fraction corrects for signal power outside the measured band."""
     return float(c_db + 10 * np.log10(K_BOLTZ * t_sys * band_hz) - 10 * np.log10(band_fraction))
@@ -202,4 +178,4 @@ def collect(
     return out
 
 
-__all__ = ["F_METEOR", "wf"]
+__all__ = ["F_METEOR", "QFH_COEFFS_DB", "t_sys_k", "wf"]  # t_sys_k, QFH: re-exported for the build and tests

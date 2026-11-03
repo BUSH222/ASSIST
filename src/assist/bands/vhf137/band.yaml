@@ -1,0 +1,25 @@
+# Band vhf137: RTL-SDR v3 at 137.000 MHz, 2.4 MS/s (plan §0, §3.4, §4.4).
+# `defaults` sit under every scenario of this band (scenario values win).
+name: vhf137
+defaults:
+  frontend:
+    fc_hz: 137.0e6
+    fs_hz: 2.4e6
+    tuner_gain_db: 49.6
+    ppm: 0.0
+    lna: {gain_db: 20.0, nf_db: 1.0}   # assumption (plan §12)
+    tuner_nf_db: 3.5                   # assumption (M1): R820T noise figure
+    saw_loss_db: 1.465                 # samples/saw.csv at 137.9 MHz; a per-frequency table arrives in M7
+    t_ant_k: 500.0                     # assumption (plan §4.3, §12): not identifiable from SNR alone
+    image_db: -75.0                    # M1: no IQ image above -75 dB
+    iip3_dbm: -30.0                    # assumption (plan §12)
+  antenna:
+    pattern: qfh_poly
+# Calibrated levels, used when a scenario has no profile. Link constant = the C/N0 (dB-Hz) the link would give at
+# 0 dB total path gain (G_tx + G_rx - FSPL = 0); P_tx = link constant + 10 log10(k T_sys), so the calibrated SNR
+# holds for any T_ant. Copied from profiles/vhf137 (a test checks they match).
+calibrations:
+  meteor_m2_3: {link_const_dbhz: 197.759}   # M1 P10, C = 147.736 dB in 100 kHz
+  meteor_m2_4: {link_const_dbhz: 199.762}   # M1 P10, C = 149.739 dB in 100 kHz
+  meteor: {link_const_dbhz: 198.796}        # M1 P10, both satellites
+  orbcomm: {link_const_dbhz: 191.600}       # M2 from M1 P2b: FM117 C/N0 at 0-10.6 deg elevation (mean of 2 channels)

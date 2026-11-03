@@ -5108,5 +5108,62 @@
    }
   }
  ],
- "gateway_137_56_excess_db": 0.439667
+ "gateway_137_56_excess_db": 0.439667,
+ "level": {
+  "method": "Transmit level from the per-block C/N0, with the simulator's link model (plan \u00a76.2).\n\nPath gain = QFH(off-nadir) + QFH(90 - el) - FSPL(range, f): the QFH pattern at both ends, perfect horizon.\nPer channel, the link constant is the median of C/N0 - path gain over blocks where the carrier is tracked\n(|Doppler residual| < max_residual_hz), the satellite is above the horizon and C/N0 is finite. The median\nkeeps the deep fade 90 s into the segment from biasing it. P_tx = link constant + 10 log10(k T_sys).\n",
+  "per_channel": [
+   {
+    "channel_hz": 137460402.472412,
+    "link_const_dbhz": 192.027114,
+    "blocks_used": 154,
+    "residual_rms_db": 3.174508,
+    "residual_p10_p90_db": [
+     -4.322376,
+     3.53406
+    ],
+    "el_deg_range": [
+     0.365098,
+     10.623675
+    ],
+    "off_nadir_deg_range": [
+     62.221436,
+     64.206015
+    ]
+   },
+   {
+    "channel_hz": 137712903.172627,
+    "link_const_dbhz": 191.172364,
+    "blocks_used": 156,
+    "residual_rms_db": 2.863706,
+    "residual_p10_p90_db": [
+     -3.443547,
+     3.79396
+    ],
+    "el_deg_range": [
+     0.365098,
+     10.623675
+    ],
+    "off_nadir_deg_range": [
+     62.221436,
+     64.206015
+    ]
+   }
+  ],
+  "link_const_dbhz": 191.599739,
+  "saw_loss_db": 1.399,
+  "p_tx_dbw_for_t_ant": {
+   "300": {
+    "t_sys_k": 518.803813,
+    "p_tx_dbw": -9.849397
+   },
+   "500": {
+    "t_sys_k": 718.803813,
+    "p_tx_dbw": -8.433325
+   },
+   "1000": {
+    "t_sys_k": 1218.803813,
+    "p_tx_dbw": -6.14009
+   }
+  }
+ }
 }

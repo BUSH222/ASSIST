@@ -1067,7 +1067,8 @@
   "doppler_residual_rms_hz": [
    0.905321,
    0.88619
-  ]
+  ],
+  "link_const_dbhz": 191.599739
  },
  "bank": {
   "dir": "bank",

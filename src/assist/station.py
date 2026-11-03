@@ -1,21 +1,27 @@
-"""Station position for the profile tool. Moves into the scenario config in M2."""
+"""Station position.
+
+The precise position lives in `samples/station.yaml` (local, never committed). Scenarios read it by default and
+fall back to the plan's rounded position (55.5 N, 37.1 E, 172 m) when it is absent, as in CI.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-# Plan §0 / Appendix A defaults; samples/station.yaml overrides lat/lon (and alt/tz if given).
-DEFAULT_ALT_M = 180.0
-DEFAULT_TZ = "+03:00"
+DEFAULT_FILE = "samples/station.yaml"
+FALLBACK_LAT_DEG = 55.5
+FALLBACK_LON_DEG = 37.1
+FALLBACK_ALT_M = 172.0
+DEFAULT_TZ = "+03:00"  # station local time, used only for SDR++-style file names
 
 
 @dataclass(frozen=True)
 class Station:
     lat_deg: float
     lon_deg: float
-    alt_m: float = DEFAULT_ALT_M
-    tz: str = DEFAULT_TZ  # local time of SDR++ file names
+    alt_m: float = FALLBACK_ALT_M
+    tz: str = DEFAULT_TZ
 
 
 def load_station(path: str | Path) -> Station:
@@ -39,6 +45,6 @@ def load_station(path: str | Path) -> Station:
     return Station(
         float(lat),  # ty: ignore[invalid-argument-type]
         float(lon),  # ty: ignore[invalid-argument-type]
-        DEFAULT_ALT_M if alt is None else float(alt),  # ty: ignore[invalid-argument-type]
+        FALLBACK_ALT_M if alt is None else float(alt),  # ty: ignore[invalid-argument-type]
         DEFAULT_TZ if tz is None else str(tz),
     )

@@ -1,0 +1,35 @@
+# Example scenario (M2: sky and truth only; IQ rendering arrives in M3).
+# Needs the local element snapshots in samples/. The station position comes from samples/station.yaml when present
+# (otherwise the rounded fallback 55.5 N, 37.1 E, 172 m).
+#   uv run assist validate scenarios/example.yaml
+#   uv run assist passes   scenarios/example.yaml --to +6h
+#   uv run assist truth    scenarios/example.yaml -o out/truth.csv --to +2h
+#   uv run assist catalog  scenarios/example.yaml -o out/catalog.tle
+version: 1
+seed: 42
+clock: {start: now, duration: 2h}
+profile: profiles/vhf137
+elements:
+  files: [samples/active.csv, samples/satnogs.csv]
+
+sources:
+  - id: m2-3
+    orbit: {norad: 57166}
+    emitters:
+      - {id: lrpt, signal: {kind: oqpsk}, freq_hz: 137.9e6, level: {cal: meteor_m2_3}}
+  - id: m2-4
+    orbit: {norad: 59051}
+    emitters:
+      - {id: lrpt, signal: {kind: oqpsk}, freq_hz: 137.9e6, offset_hz: 500, level: {cal: meteor_m2_4}}
+  - id: transit-5b5            # a zombie carrier on a real catalog object (SatNOGS feed)
+    preset: zombie
+    orbit: {norad: 965}
+    freq_hz: 136.65e6
+  - id: z1                     # a synthetic zombie, not in the catalog
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +2min, max_el_deg: 45, direction: desc}}
+    freq_hz: "uniform(136.1e6, 137.9e6)"
+    oscillator: {pass_offset_sigma_hz: 50, drift_hz_s: 0.2}
+    schedule: {on_s: 40, off_s: 180}
+    am: {period_s: 7.5, depth_db: 6}
+    level: {cn0_zenith_dbhz: 45}
