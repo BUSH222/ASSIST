@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
 
@@ -311,6 +311,117 @@ def render(
     for f in files:
         typer.echo(str(f.path))
     typer.echo(f"done: {n / rd.fs / elapsed:.1f}x real time, scenario hash {r.hash}", err=True)
+
+
+def _starts_now(scenario: Path, sets: list[str] | None) -> bool:
+    """Whether the scenario's clock starts `now` (a live stream); call after _resolve has accepted it."""
+    from assist.config.loader import load_scenario
+
+    clock = load_scenario(scenario, tuple(sets or ())).get("clock") or {}
+    return isinstance(clock, dict) and str(clock.get("start", "now")) == "now"
+
+
+def _rtl_tcp_sink(sinks: list[dict[str, Any]], host: str | None, port: int | None) -> tuple[str, int]:
+    """Listen address: the options, else the scenario's `rtl_tcp` sink, else 127.0.0.1:1234."""
+    cfg = next((s["rtl_tcp"] for s in sinks if isinstance(s.get("rtl_tcp"), dict)), {})
+    return host or str(cfg.get("host") or "127.0.0.1"), port if port is not None else int(cfg.get("port", 1234))
+
+
+@app.command()
+def serve(
+    scenario: ScenarioArg,
+    host: Annotated[
+        str | None, typer.Option(help="Listen address (default: the scenario's rtl_tcp sink, else 127.0.0.1).")
+    ] = None,
+    port: Annotated[
+        int | None, typer.Option(help="TCP port (default: the scenario's rtl_tcp sink, else 1234).")
+    ] = None,
+    pacing: Annotated[str, typer.Option(help="realtime, or unpaced (as fast as the clients read).")] = "realtime",
+    t_from: FromOpt = None,
+    duration: Annotated[
+        str | None, typer.Option(help="Stop after this much stream, e.g. 1h (default: endless).")
+    ] = None,
+    lookahead: Annotated[str, typer.Option(help="Render-ahead ring, e.g. 1s.")] = "1s",
+    out: Annotated[Path, typer.Option("-o", "--out", help="Directory for run.json.")] = Path("out/serve"),
+    set_: SetOpt = None,
+) -> None:
+    """Serve the station's uint8 IQ stream over rtl_tcp (read-only clients such as SDR++). Ctrl-C stops it.
+
+    With `clock.start: now` and realtime pacing the stream is live: it starts at the next whole second after the
+    pre-roll, and sample time equals wall time. Otherwise it starts at --from (default: the clock start).
+    """
+    import asyncio
+    import logging
+    import math
+    import time
+
+    from assist.engine.control import RenderError
+    from assist.engine.render import Renderer
+    from assist.engine.scene import Scene
+    from assist.sinks import runinfo
+    from assist.sinks.rtltcp import CHUNK_SAMPLES, PACINGS, RenderAhead, RtlTcpServer, live_start, stderr_handler
+    from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
+
+    if pacing not in PACINGS:
+        raise typer.BadParameter("--pacing must be realtime or unpaced")
+    look = parse_duration(lookahead)
+    if look <= 0:
+        raise typer.BadParameter("--lookahead must be positive")
+    r = _resolve(scenario, set_)
+    sc = r.scenario
+    host_, port_ = _rtl_tcp_sink(sc.sinks, host, port)
+    live = pacing == "realtime" and t_from is None and _starts_now(scenario, set_)
+    try:
+        rd = Renderer(Scene(sc))
+    except (RenderError, ValueError, NotImplementedError) as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from e
+    n = round(parse_duration(duration) * rd.fs) if duration else None
+    if n is not None and n <= 0:
+        raise typer.BadParameter("--duration must be positive")
+    t0 = parse_iso(sc.clock.start)
+    wall = live_start(time.time(), look) if live else None
+    n0 = wall * rd.fs if wall is not None else sample_at(parse_time(t_from, t0) if t_from else t0, rd.fs)
+    ahead = RenderAhead(rd, n0, n, max(1, math.ceil(look * rd.fs / CHUNK_SAMPLES)), piece=10 * rd.hop)
+    server = RtlTcpServer(ahead, rd.fs, rd.fc_hz, host=host_, port=port_, pacing=pacing, wall_start=wall)
+    cfg = {"host": host_, "port": port_, "pacing": pacing, "live": live, "lookahead_s": look}
+    run_path = out / "run.json"
+    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, "rtl_tcp", n0, n, [], "serving", serve=cfg))
+    typer.echo(f"serving from {format_iso(n0 / rd.fs, 3)}{' (live)' if live else ''}; run.json in {out}", err=True)
+    logger = logging.getLogger("assist.serve")
+    handler = stderr_handler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    status, code = "complete" if n is not None else "stopped", 0
+    try:
+        asyncio.run(server.serve())
+    except KeyboardInterrupt:
+        status = "stopped"
+    except RenderError as e:
+        status, code = "error", 2
+        typer.echo(f"error: {e}", err=True)
+    except OSError as e:
+        status, code = "error", 1
+        typer.echo(f"error: {e}", err=True)
+    finally:
+        logger.removeHandler(handler)
+    st = server.stats
+    stream = {
+        "samples": st.samples,
+        "seconds": st.samples / rd.fs,
+        "stalls": st.stalls,
+        "stall_s": round(st.stall_s, 3),
+        "clients": st.clients,
+        "slow_disconnects": st.slow_disconnects,
+    }
+    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, "rtl_tcp", n0, n, [], status, serve=cfg, stream=stream))
+    typer.echo(
+        f"{status}: {st.samples / rd.fs:.1f} s streamed, {st.stalls} stall(s), {st.clients} client(s), "
+        f"scenario hash {r.hash}",
+        err=True,
+    )
+    if code:
+        raise typer.Exit(code)
 
 
 @elements_app.command()

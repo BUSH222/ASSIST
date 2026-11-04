@@ -1,4 +1,5 @@
-"""`run.json` (plan §7.2): provenance next to every render. Not truth: truth is computed from the scenario.
+"""`run.json` (plan §7.2): provenance next to every render or serving session. Not truth: truth is computed from the
+scenario.
 
 It holds the resolved scenario (so `Scene` can be rebuilt from it), its hash, the package version and engine, the
 render window as absolute sample indices, the noise source and ADC gain, and each output file's first sample.
@@ -21,8 +22,9 @@ ENGINE = "python reference (M3)"
 
 
 def run_info(
-    r: Resolved, rd: Renderer, fmt: str, n0: int, n: int, files: list[OutFile], status: str, **extra: Any
+    r: Resolved, rd: Renderer, fmt: str, n0: int, n: int | None, files: list[OutFile], status: str, **extra: Any
 ) -> dict[str, Any]:
+    """n None: an endless stream (`serve` without --duration)."""
     fs = rd.fs
     return {
         "status": status,
@@ -37,7 +39,7 @@ def run_info(
             "start_sample_abs": n0,
             "start_utc": format_iso(n0 / fs, 6),
             "n_samples": n,
-            "duration_s": n / fs,
+            "duration_s": None if n is None else n / fs,
             "station_tz": r.scenario.station.tz,
         },
         "noise": {
