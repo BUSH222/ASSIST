@@ -19,7 +19,7 @@ from assist.config.resolve import resolve_document
 from assist.engine.control import RenderError
 from assist.engine.render import Renderer
 from assist.engine.scene import Scene
-from assist.timebase import sample_at
+from assist.timebase import parse_iso, sample_at
 
 ROOT = Path(__file__).resolve().parent.parent
 FS = 2_400_000
@@ -202,7 +202,7 @@ def test_render_window_independence(zombie: Scene, tmp: Path) -> None:
 
 
 def test_adding_a_source_changes_no_other_signal(tmp: Path) -> None:
-    """T-KEY (signal): another source changes neither the first source's narrow blocks nor, while it is silent, the
+    """T-KEY (signal): another source changes neither the first source's narrow samples nor, while it is silent, the
     output bytes."""
     a = _scene(tmp, [_zombie()], "key_a")
     later = dict(PASS, aos="+40min")
@@ -210,9 +210,11 @@ def test_adding_a_source_changes_no_other_signal(tmp: Path) -> None:
     p = _pass(a, "z1")
     n0 = sample_at(p.tca, FS)
     ra, rab = Renderer(a), Renderer(ab)
-    for b in range(n0 // 24000, n0 // 24000 + 30):
-        va, vab = ra.emitters[0].block(b), rab.emitters[0].block(b)
-        assert (va is None and vab is None) or (va is not None and vab is not None and np.array_equal(va, vab))
+    for c in range(n0 // FS - 30, n0 // FS + 30, 3):
+        va, vab = ra.emitters[0].stream(c), rab.emitters[0].stream(c)
+        assert (va is None) == (vab is None)
+        if va is not None and vab is not None:
+            assert np.array_equal(va.x, vab.x) and np.array_equal(va.active, vab.active)
     a2 = _scene(tmp, [_zombie()], "key_a2")
     b2 = _scene(tmp, [_zombie(), _zombie("z9", 137.6e6, orbit={"synthetic_pass": later})], "key_b2")
     np.testing.assert_array_equal(Renderer(a2).u8(n0, 50_000), Renderer(b2).u8(n0, 50_000))
@@ -296,3 +298,42 @@ def test_unimplemented_signal_kinds_are_refused(tmp: Path) -> None:
     src["emitters"][0]["signal"] = {"kind": "oqpsk"}
     with pytest.raises(NotImplementedError, match="M6"):
         Renderer(_scene(tmp, [src], "oqpsk"))
+
+
+def test_cpp_and_numpy_engines_agree(zombie: Scene) -> None:
+    """The same render through the C++ kernels and their numpy twins: the noise draw is the same bits, the rest
+    agrees to float rounding, so bytes differ by at most one count, and rarely (plan §2)."""
+    from assist import _dsp, dsp_ref
+
+    sch = zombie.source("z1").emitters[0].schedule
+    p = _pass(zombie, "z1")
+    t_on = next(a for a, _ in sch.on_intervals(p.aos, p.los) if a > p.aos + 2)  # ty: ignore[unresolved-attribute]
+    n0 = sample_at(t_on - 0.4, FS)  # across the rising edge and a chunk boundary
+    a = Renderer(Scene(zombie.scenario), dsp=_dsp).u8(n0, FS).astype(np.int16)
+    b = Renderer(Scene(zombie.scenario), dsp=dsp_ref).u8(n0, FS).astype(np.int16)
+    d = np.abs(a - b)
+    assert d.max() <= 1
+    assert np.count_nonzero(d) <= 1e-4 * d.size
+
+
+def test_stage_times_are_recorded(cw: Scene) -> None:
+    rd = Renderer(Scene(cw.scenario))
+    rd.u8(sample_at(_pass(cw, "c1").tca, FS), FS // 2)
+    for stage in ("control", "synth", "noise", "adc"):
+        assert rd.times[stage] > 0
+    assert rd.times["prefetch"] == 0
+
+
+def test_prefetch_computes_the_next_hour_and_changes_nothing(tmp: Path) -> None:
+    """Live serving: in the last minute of an hour the next hour's passes are computed a few emitters per chunk;
+    the stream is the same bytes as without prefetching."""
+    sources = [_cw(f"c{i}", 136.2e6 + i * 0.3e6, orbit={"synthetic_pass": dict(PASS, aos="+50min")}) for i in range(3)]
+    scene = _scene(tmp, sources, "prefetch", clock={"start": "2026-11-04T12:00:00Z", "duration": "2h"})
+    n0 = sample_at(parse_iso("2026-11-04T12:59:50Z"), FS)
+    pre = Renderer(Scene(scene.scenario), prefetch=True)
+    lazy = Renderer(Scene(scene.scenario))
+    a = pre.u8(n0, 5 * FS)  # 12:59:50 .. 12:59:55, inside the last minute
+    assert all(er.has_hour(math.floor(parse_iso("2026-11-04T13:00:00Z") / 3600)) for er in pre.emitters)
+    assert pre.times["prefetch"] > 0
+    np.testing.assert_array_equal(a, lazy.u8(n0, 5 * FS))
+    np.testing.assert_array_equal(pre.u8(n0 + 5 * FS, 10 * FS), lazy.u8(n0 + 5 * FS, 10 * FS))  # across 13:00

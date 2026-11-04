@@ -6,9 +6,11 @@ ADRIFT can be tested against a sky whose content is known exactly.
 
 The implementation plan (`samples/plan.md`) and the per-milestone `checkpoint.md` are kept locally, not in git.
 
-Status: M4 (live serving). Scenarios resolve to a self-contained document, the truth (frequencies, Doppler,
+Status: M5 (acceleration). Scenarios resolve to a self-contained document, the truth (frequencies, Doppler,
 geometry, levels, events) can be computed, and `cw` emitters (zombies) render to the station's uint8 IQ stream with
 profile-shaped noise. The stream is served over rtl_tcp in real time, or written as SDR++-style WAV or raw cu8 files.
+The DSP runs in C++ kernels (pocketfft): 20 carriers plus noise render at ~7.6x real time on one core, and files
+render in parallel worker processes (~26x on 6 cores, the same bytes for any number of workers).
 
 ## Usage
 
@@ -18,8 +20,9 @@ uv run assist resolve  scenarios/example.yaml -o out/resolved.json
 uv run assist passes   scenarios/example.yaml --to +6h        # pass table of all satellite sources
 uv run assist truth    scenarios/example.yaml -o out/truth.csv --to +2h [--step 1s] [--format jsonl]
 uv run assist catalog  scenarios/example.yaml -o out/catalog.tle   # element sets ADRIFT is given
-uv run assist render   scenarios/zombie_single.yaml -o out/m3      # WAV files (10 min each) + run.json
-uv run assist render   scenarios/zombie_single.yaml -o out/raw --format cu8 --from +7min --duration 90s
+uv run assist render   scenarios/zombie_single.yaml -o out/m3      # WAV files (10 min each) + run.json, all CPUs
+uv run assist render   scenarios/zombie_single.yaml -o out/raw --format cu8 --from +7min --duration 90s --workers 2
+uv run assist bench    scenarios/bench_cw20.yaml [--duration 5min] # speed on 1 worker and on all CPUs, no files
 uv run assist serve    scenarios/serve_demo.yaml                 # rtl_tcp on 127.0.0.1:1234, live, until Ctrl-C
 uv run assist schema                                          # JSON Schema of a scenario
 uv run assist elements fetch                                  # network: dated retlector.eu snapshots
@@ -27,7 +30,8 @@ uv run assist profile  build | labels | report                # data survey of s
 ```
 
 Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`).
-Renders are byte-identical for the same scenario, and any window equals the same slice of a longer render. WAV files
+Renders are byte-identical for the same scenario (on the same backend), whatever the number of workers, and any
+window equals the same slice of a longer render. WAV files
 are named like SDR++ recordings (`baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav`, station local time); `--rf64` writes
 one file instead of 10 min splits. The station position is read from `samples/station.yaml` when present; otherwise
 the rounded position (55.5 N, 37.1 E, 172 m) is used.
@@ -52,7 +56,12 @@ uv run pytest
 
 - **C++ edits** under `cpp/` need no reinstall: the editable install rebuilds `assist._dsp` on the next import
   (a few seconds).
-- **`ASSIST_PURE=1`** runs the numpy reference kernels (`assist.dsp_ref`) instead of the C++ ones.
+- **`ASSIST_PURE=1`** runs the numpy reference kernels (`assist.dsp_ref`) instead of the C++ ones (~1.3x real time
+  on 20 carriers). The noise generator gives the same bits on both; the rest agrees to float rounding, so rendered
+  bytes differ by at most one count, in a few per million.
+- **C++ kernels** (`cpp/`): `synth` (overlap-add synthesis), `white`/`noise` (Philox4x32-10 + Box-Muller noise,
+  shaped by overlap-save), `adc`; pocketfft is vendored in `cpp/third_party/`. Each has a numpy twin, compared in
+  `tests/test_dsp_ref.py`.
 - **`ASSIST_NATIVE=ON uv sync --reinstall-package assist`** builds with `-march=native` (local use only);
   a plain `uv sync --reinstall-package assist` switches back.
 

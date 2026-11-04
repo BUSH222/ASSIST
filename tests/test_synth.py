@@ -1,8 +1,9 @@
-"""T-OLA (plan §10.1): single signals through the overlap-add synthesiser.
+"""T-OLA (plan §10.1): single signals through the overlap-add synthesiser (`synth` kernel, C++ and numpy twin).
 
 The synthesiser is driven directly: an emitter at narrow rate r and coarse bin k gets its narrow samples
-[bL/2, bL/2 + L) per block b, Hann-windowed, and the output hops are compared with the same signal computed
-directly at fs. Block indices are absolute (around 1.8e11 in 2026), so the (-1)^(k b) hop phase is exercised.
+[bL/2, bL/2 + L) per block b (the kernel applies the Hann window), and the output hops are compared with the same
+signal computed directly at fs. Block indices are absolute (around 1.8e11 in 2026), so the (-1)^(k b) hop phase is
+exercised.
 
 - CW at several bins (odd and even) and offsets from the bin;
 - QPSK at 72 ksym/s with an RRC pulse (alpha 0.6) at 4 samples per symbol, a stand-in for the M6 `oqpsk` signal:
@@ -14,7 +15,8 @@ Checks: error and spurious lines <= -60 dBc, CW amplitude flat within 0.01 dB, n
 import numpy as np
 import pytest
 
-from assist.engine.synth import add_block, hann, overlap, to_time
+from assist import _dsp, dsp_ref
+from assist.engine.synth import hann
 
 FS = 2_400_000
 HOP = FS // 100
@@ -22,16 +24,17 @@ M = 2 * HOP
 B0 = 179_379_411_740  # an absolute block index in 2026 (Unix time / 10 ms)
 
 
-def _synth(narrow, rate: int, k_bin: int, h0: int, hops: int) -> np.ndarray:
+BACKENDS = pytest.mark.parametrize("dsp", [_dsp, dsp_ref], ids=["c++", "numpy"])
+
+
+def _synth(dsp, narrow, rate: int, k_bin: int, h0: int, hops: int) -> np.ndarray:
     """Output hops h0 .. h0 + hops - 1, with narrow(n0, n) giving narrow samples at absolute indices."""
     n = rate * M // FS
-    blocks = {}
-    for b in range(h0 - 1, h0 + hops):
-        acc = np.zeros(M, dtype=np.complex64)
-        v = (narrow(b * (n // 2), n) * hann(n)).astype(np.complex64)
-        add_block(acc, v, k_bin, b)
-        blocks[b] = to_time(acc, None)
-    return np.concatenate([overlap(blocks[h - 1], blocks[h], HOP) for h in range(h0, h0 + hops)])
+    half = n // 2
+    b0, nb = h0 - 1, hops + 1  # blocks h0 - 1 .. h0 + hops - 1
+    x = np.asarray(narrow(b0 * half, (nb + 1) * half), dtype=np.complex64)
+    y = dsp.synth([x], [n], [k_bin], [np.ones(nb, dtype=np.uint8)], b0, nb, M)
+    return y[HOP : (hops + 1) * HOP]  # hop h is at (h - b0) * HOP
 
 
 def _tone(n_abs: np.ndarray, f_hz: int, rate: int) -> np.ndarray:
@@ -59,10 +62,11 @@ def _max_line_dbc(err: np.ndarray, ref: np.ndarray) -> float:
     ("k_bin", "delta_hz", "rate"),
     [(7000, 0, 11_000), (7001, 1234, 11_000), (-12345, -4321, 12_000), (23_999, 2_500, 12_000), (-24_000, 17, 2000)],
 )
-def test_ola_cw(k_bin: int, delta_hz: int, rate: int) -> None:
+@BACKENDS
+def test_ola_cw(dsp, k_bin: int, delta_hz: int, rate: int) -> None:
     hops = 40
     h0 = B0 + 3
-    y = _synth(lambda n0, n: _tone(n0 + np.arange(n, dtype=np.int64), delta_hz, rate), rate, k_bin, h0, hops)
+    y = _synth(dsp, lambda n0, n: _tone(n0 + np.arange(n, dtype=np.int64), delta_hz, rate), rate, k_bin, h0, hops)
     n_abs = h0 * HOP + np.arange(hops * HOP, dtype=np.int64)
     ideal = _tone(n_abs, k_bin * 50 + delta_hz, FS)
     err = y.astype(np.complex128) - ideal
@@ -122,7 +126,8 @@ class _Qpsk:
         return out
 
 
-def test_ola_qpsk() -> None:
+@BACKENDS
+def test_ola_qpsk(dsp) -> None:
     """QPSK (stand-in for oqpsk until M6), offset 3 kHz from an odd bin: error <= -60 dBc against the direct signal."""
     hops = 12
     h0 = B0 + 7
@@ -135,7 +140,7 @@ def test_ola_qpsk() -> None:
         t = (n_abs - (h0 - 2) * HOP * QPSK_RATE // FS) / QPSK_RATE  # exact: (h0 - 2) * HOP * r / fs is an integer
         return q.at(t + 0.0) * _tone(n_abs, delta, QPSK_RATE)
 
-    y = _synth(narrow, QPSK_RATE, k_bin, h0, hops)
+    y = _synth(dsp, narrow, QPSK_RATE, k_bin, h0, hops)
     n_abs = h0 * HOP + np.arange(hops * HOP, dtype=np.int64)
     ref = q.at((n_abs - (h0 - 2) * HOP) / FS) * _tone(n_abs, k_bin * 50 + delta, FS)
     assert t_ref > 0
@@ -150,12 +155,15 @@ def test_hann_sums_to_one() -> None:
         np.testing.assert_allclose(w[: n // 2] + w[n // 2 :], 1.0, atol=1e-15)
 
 
-def test_add_block_wraps_around_the_spectrum() -> None:
+@BACKENDS
+def test_blocks_wrap_around_the_spectrum(dsp) -> None:
     """A block near the edge of the M-bin grid wraps (mod M), as an RTL alias would."""
-    acc = np.zeros(M, dtype=np.complex64)
-    v = np.ones(200, dtype=np.complex64)  # DC only
-    add_block(acc, v, M // 2 - 10, 0)
-    assert np.argmax(np.abs(acc)) == M // 2 - 10
-    acc2 = np.zeros(M, dtype=np.complex64)
-    add_block(acc2, v * np.exp(-2j * np.pi * 50 * np.arange(200) / 10_000).astype(np.complex64), 0, 0)
-    assert np.argmax(np.abs(acc2)) == M - 1  # bin -1
+
+    def peak_bin(x: np.ndarray, k: int) -> int:
+        y = dsp.synth([x], [200], [k], [np.ones(1, dtype=np.uint8)], 0, 1, M)  # one block: out[:M] is it alone
+        return int(np.argmax(np.abs(np.fft.fft(y[:M]))))
+
+    assert peak_bin(np.ones(300, dtype=np.complex64), M // 2 - 10) == M // 2 - 10  # DC at the bin
+    tone = np.exp(-2j * np.pi * 50 * np.arange(300) / 10_000).astype(np.complex64)  # -50 Hz at 10 kHz
+    assert peak_bin(tone, 0) == M - 1  # bin -1
+    assert peak_bin(np.ones(300, dtype=np.complex64), -3 * M - 7) == M - 7

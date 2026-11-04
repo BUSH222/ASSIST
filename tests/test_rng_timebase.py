@@ -72,3 +72,13 @@ def test_durations_and_relative_times() -> None:
 def test_fast_time_matches_full_model() -> None:
     t = parse_iso("2026-11-01T16:39:00Z") + np.arange(3.0)
     np.testing.assert_array_equal(unix_to_time(t).tt, unix_to_time_fast(t).tt)
+
+
+def test_key64_is_stable_and_keyed() -> None:
+    """The 64-bit key of the C++ noise generator comes from the same seed sequence as the numpy streams."""
+    a, b = KeyedRng(42), KeyedRng(42)
+    k = a.key64("noise")
+    assert k == b.key64("noise") and 0 <= k < 2**64
+    assert k != KeyedRng(43).key64("noise") and k != a.key64("noise2")
+    want = np.random.SeedSequence(42, spawn_key=(key_int("noise"),)).generate_state(1, np.uint64)[0]
+    assert k == int(want)

@@ -25,6 +25,7 @@ SetOpt = Annotated[
 ]
 FromOpt = Annotated[str | None, typer.Option("--from", help="ISO time, `start`, or +offset (default: clock start).")]
 ToOpt = Annotated[str | None, typer.Option("--to", help="ISO time or +offset from the clock start (default: end).")]
+WorkersOpt = Annotated[int | None, typer.Option(help="Worker processes (default: the number of CPUs).")]
 
 
 def _print_version(value: bool) -> None:
@@ -69,6 +70,14 @@ def _resolve(scenario: Path, sets: list[str] | None) -> Resolved:
     for w in r.warnings:
         typer.echo(f"warning: {w}", err=True)
     return r
+
+
+def _workers(n: int | None) -> int:
+    import os
+
+    if n is not None and n < 1:
+        raise typer.BadParameter("--workers must be >= 1")
+    return n if n is not None else os.cpu_count() or 1
 
 
 def _window(r: Resolved, t_from: str | None, t_to: str | None) -> tuple[float, float]:
@@ -249,11 +258,13 @@ def render(
     fmt: Annotated[str, typer.Option("--format", help="wav (split every 10 min) or cu8 (one raw file).")] = "wav",
     rf64: Annotated[bool, typer.Option("--rf64", help="With wav: one RF64 file instead of 10 min splits.")] = False,
     force: Annotated[bool, typer.Option("--force", help="Overwrite existing output files.")] = False,
+    workers: WorkersOpt = None,
     set_: SetOpt = None,
 ) -> None:
-    """Render the station's uint8 IQ stream to files (Python reference engine)."""
+    """Render the station's uint8 IQ stream to files, in parallel worker processes (same bytes for any count)."""
     import time
 
+    from assist.engine import workers as pool
     from assist.engine.control import RenderError
     from assist.engine.render import Renderer
     from assist.engine.scene import Scene
@@ -261,6 +272,7 @@ def render(
     from assist.sinks.wavfile import FileSink, plan_files
     from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
 
+    nw = _workers(workers)
     if fmt not in ("wav", "cu8"):
         raise typer.BadParameter("--format must be wav or cu8")
     if rf64 and fmt != "wav":
@@ -285,15 +297,19 @@ def render(
     if existing and not force:
         typer.echo(f"error: {existing[0]} exists (use --force to overwrite)", err=True)
         raise typer.Exit(1)
-    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, kind, n0, n, files, "rendering"))
+    nw = min(nw, len(pool.tasks(n0, n, rd.fs)))
+    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, kind, n0, n, files, "rendering", workers=nw))
     typer.echo(
-        f"rendering {n / rd.fs:.1f} s from {format_iso(n0 / rd.fs, 3)} into {len(files)} file(s) in {out}", err=True
+        f"rendering {n / rd.fs:.1f} s from {format_iso(n0 / rd.fs, 3)} into {len(files)} file(s) in {out}"
+        f" ({nw} worker{'s' if nw > 1 else ''})",
+        err=True,
     )
     sink = FileSink(files, kind, rd.fs)
     tic = time.perf_counter()
     report = 60 * rd.fs
+    stream = pool.iter_u8(r.canonical, Path.cwd(), n0, n, rd.fs, nw) if nw > 1 else rd.iter_u8(n0, n)
     try:
-        for chunk in rd.iter_u8(n0, n):
+        for chunk in stream:
             sink.write(chunk)
             if sink.written >= report or sink.written == n:
                 done_s = sink.written / rd.fs
@@ -306,11 +322,65 @@ def render(
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(2) from e
     elapsed = time.perf_counter() - tic
-    info = runinfo.run_info(r, rd, kind, n0, n, files, "complete", render_seconds=round(elapsed, 3))
+    info = runinfo.run_info(r, rd, kind, n0, n, files, "complete", workers=nw, render_seconds=round(elapsed, 3))
     runinfo.write_run_json(run_path, info)
     for f in files:
         typer.echo(str(f.path))
     typer.echo(f"done: {n / rd.fs / elapsed:.1f}x real time, scenario hash {r.hash}", err=True)
+
+
+@app.command()
+def bench(
+    scenario: ScenarioArg,
+    t_from: FromOpt = None,
+    duration: Annotated[str, typer.Option(help="Stream to render, e.g. 60s or 10min.")] = "60s",
+    workers: WorkersOpt = None,
+    out: Annotated[Path, typer.Option("-o", "--out", help="Directory for <scenario>.json.")] = Path("out/bench"),
+    set_: SetOpt = None,
+) -> None:
+    """Render speed vs real time, on one worker (one core) and on N, without writing IQ (plan §4.5)."""
+    import json
+
+    from assist.engine import bench as bn
+    from assist.engine.control import RenderError
+    from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
+
+    nw = _workers(workers)
+    r = _resolve(scenario, set_)
+    sc = r.scenario
+    fs = int(sc.frontend.fs_hz)
+    t0 = parse_iso(sc.clock.start)
+    n0 = sample_at(parse_time(t_from, t0) if t_from else t0, fs)
+    n = round(parse_duration(duration) * fs)
+    if n <= 0:
+        raise typer.BadParameter("--duration must be positive")
+    try:
+        found = bn.run(r, n0, n, nw, Path.cwd(), lambda m: typer.echo(m, err=True))
+    except (RenderError, ValueError, NotImplementedError) as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from e
+    res: dict[str, Any] = {"scenario": str(scenario), "start_utc": format_iso(n0 / fs, 3), **found}
+    one = res["one_worker"]
+    typer.echo(
+        f"engine: {res['engine']}; {res['emitters']} emitters; {res['duration_s']:.1f} s from {res['start_utc']}"
+    )
+    typer.echo(f"1 worker:  {one['x_real_time']:6.2f}x real time ({one['seconds']:.2f} s)")
+    for k, v in one["stage_s_per_stream_s"].items():
+        typer.echo(f"  {k:<9} {v * 1000:7.1f} ms per s of stream")
+    typer.echo(f"  {'other':<9} {one['other_s_per_stream_s'] * 1000:7.1f} ms per s of stream")
+    if "workers" in res:
+        w = res["workers"]
+        same = "identical" if w["identical_to_one_worker"] else "DIFFERENT"
+        typer.echo(
+            f"{w['count']} workers: {w['x_real_time']:6.2f}x real time ({w['seconds']:.2f} s; start-up and warm-up "
+            f"{w['start_up_and_warm_up_s']:.1f} s); stream {same} to 1 worker"
+        )
+    path = out / f"{scenario.stem}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(res, indent=1) + "\n")
+    typer.echo(str(path))
+    if "workers" in res and not res["workers"]["identical_to_one_worker"]:
+        raise typer.Exit(1)
 
 
 def _starts_now(scenario: Path, sets: list[str] | None) -> bool:
@@ -372,7 +442,7 @@ def serve(
     host_, port_ = _rtl_tcp_sink(sc.sinks, host, port)
     live = pacing == "realtime" and t_from is None and _starts_now(scenario, set_)
     try:
-        rd = Renderer(Scene(sc))
+        rd = Renderer(Scene(sc), prefetch=True)
     except (RenderError, ValueError, NotImplementedError) as e:
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(2) from e

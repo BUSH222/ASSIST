@@ -18,7 +18,12 @@ if TYPE_CHECKING:
     from assist.engine.render import Renderer
     from assist.sinks.wavfile import OutFile
 
-ENGINE = "python reference (M3)"
+
+def engine_name(rd: Renderer) -> str:
+    """The kernels behind a render: "c++ (M5)" (with "-march=native" when built so), or "numpy reference (M5)"."""
+    if rd.dsp.__name__ == "assist.dsp_ref":
+        return "numpy reference (M5)"
+    return "c++, -march=native (M5)" if getattr(rd.dsp, "_native", False) else "c++ (M5)"
 
 
 def run_info(
@@ -29,7 +34,7 @@ def run_info(
     return {
         "status": status,
         "assist_version": __version__,
-        "engine": ENGINE,
+        "engine": engine_name(rd),
         "scenario_hash": r.hash,
         "clock_start": r.scenario.clock.start,
         "render": {

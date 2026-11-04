@@ -4,9 +4,11 @@
   turned into a 513-tap FIR by frequency sampling: the inverse FFT of the amplitude 10^(dB/20) with zero phase,
   truncated to the central 513 taps. The taps are Hermitian, so the response is real (zero phase). Without a profile
   the shape is flat (a single tap).
-- **Noise.** White complex Gaussian at fs, one keyed draw per absolute hop ("noise", hop) (plan §3.2), filtered by
-  overlap-save. Hop h uses its own draw plus the last 512 samples of hop h-1's draw, so any hop can be computed on
-  its own. The PSD's 0 dB level is k T_sys: noise and signals are both referred to the antenna terminals in sqrt(mW).
+- **Noise.** White complex Gaussian at fs from a counter-based generator (`dsp.white`: Philox4x32-10 keyed by
+  KeyedRng.key64("noise"), counter = absolute hop index, then Box-Muller; plan §3.2), filtered by overlap-save
+  (`dsp.noise`) in segments of a third of a hop. Hop h uses its own draw plus the last 512 samples of hop h-1's draw,
+  so any hop can be computed on its own. The PSD's 0 dB level is k T_sys: noise and signals are both referred to the
+  antenna terminals in sqrt(mW).
 - **Receiver response for signals** (stage 1, default): the same FIR's magnitude on the synthesiser's bin grid. Signals
   and noise then share one shape, so the calibrated C/N0 holds at every frequency.
 - **ADC** (stage 7): u = clip(rint(127.5 + G * I/Q), 0, 255), interleaved I, Q. G is set so the shaped noise has
@@ -24,11 +26,13 @@ from assist.emitters.link import K_BOLTZ
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from types import ModuleType
 
     from assist.rng import KeyedRng
 
 FIR_TAPS = 513
 PROFILE_FFT = 16384
+NOISE_SPLIT = 3  # overlap-save segments per hop (8000 samples at 2.4 MS/s: a batch of 4 transforms fits in L2)
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,23 @@ def noise_spec(
     return NoiseSpec(shape, sigma, source)
 
 
+def next_smooth(n: int) -> int:
+    """Smallest 2^a 3^b 5^c >= n: an FFT length pocketfft does with its fastest passes (scipy's next_fast_len also
+    takes 7 and 11, e.g. 8575 = 5^2 7^3 for 8512)."""
+    best = 1 << max(0, (n - 1).bit_length())
+    p5 = 1
+    while p5 < best:
+        p35 = p5
+        while p35 < best:
+            p = p35
+            while p < n:
+                p *= 2
+            best = min(best, p)
+            p35 *= 3
+        p5 *= 5
+    return best
+
+
 def design_fir(shape_db: np.ndarray | None, taps: int = FIR_TAPS) -> np.ndarray:
     """Zero-phase FIR (complex128, `taps` long, centre tap at taps // 2) whose magnitude follows shape_db.
 
@@ -97,10 +118,25 @@ def fir_response(h: np.ndarray, m: int) -> np.ndarray:
 
 
 class Frontend:
-    """Noise generation, receiver response and ADC for one scene (sample rate fs, hop N, synthesis FFT M)."""
+    """Noise generation, receiver response and ADC for one scene (sample rate fs, hop N, synthesis FFT M).
 
-    def __init__(self, spec: NoiseSpec, t_sys_k: float, fs: int, hop: int, m: int, rng: KeyedRng) -> None:
-        self.spec, self.fs, self.hop, self.m, self.rng = spec, fs, hop, m, rng
+    `dsp` is the kernel backend (assist.backend.dsp by default: C++, or the numpy twins with ASSIST_PURE=1).
+    """
+
+    def __init__(
+        self,
+        spec: NoiseSpec,
+        t_sys_k: float,
+        fs: int,
+        hop: int,
+        m: int,
+        rng: KeyedRng,
+        dsp: ModuleType | None = None,
+    ) -> None:
+        if dsp is None:
+            from assist.backend import dsp
+        self.dsp = dsp
+        self.spec, self.fs, self.hop, self.m = spec, fs, hop, m
         h = design_fir(spec.shape_db)
         self.flat = spec.shape_db is None
         # Receiver response for signals on the synthesiser grid (None when flat: nothing to multiply).
@@ -110,36 +146,19 @@ class Frontend:
         scale = np.sqrt(p_flat_mw / 2)
         self.taps = (h * scale).astype(np.complex64)
         self.n_hist = len(h) - 1
-        self.ols_size = sfft.next_fast_len(hop + self.n_hist)
-        self.taps_f = sfft.fft(self.taps, self.ols_size)
+        split = NOISE_SPLIT if hop % (2 * NOISE_SPLIT) == 0 else 1
+        self.noise_sub = hop // split
+        self.ols_size = next_smooth(self.noise_sub + self.n_hist)
+        self.taps_f = np.asarray(sfft.fft(self.taps, self.ols_size), dtype=np.complex64)
+        self.key = rng.key64("noise")
         # Per-component noise sigma (sqrt(mW)) after the FIR, and the ADC gain that maps it to sigma_counts.
         self.noise_sigma = float(scale * np.sqrt(np.sum(np.abs(h) ** 2)))
         self.gain = spec.sigma_counts / self.noise_sigma
-        self._white: dict[int, np.ndarray] = {}
 
-    def white(self, h: int) -> np.ndarray:
-        """Unit-variance (per component) complex white noise of hop h, keyed ("noise", h). Cached for the next hop."""
-        w = self._white.get(h)
-        if w is None:
-            g = self.rng.stream("noise", h)
-            w = g.standard_normal(2 * self.hop, dtype=np.float32).view(np.complex64)
-            self._white[h] = w
-            for old in [k for k in self._white if k < h - 1 or k > h + 1]:
-                del self._white[old]
-        return w
+    def noise(self, h: int, nhops: int = 1, out: np.ndarray | None = None) -> np.ndarray:
+        """Shaped noise of hops h .. h + nhops - 1 (complex64, sqrt(mW)), by overlap-save; each hop on its own."""
+        return self.dsp.noise(self.key, h, nhops, self.hop, self.noise_sub, self.taps_f, self.n_hist, out)
 
-    def noise(self, h: int) -> np.ndarray:
-        """Shaped noise of hop h (complex64, sqrt(mW)), by overlap-save from hops h-1 and h."""
-        seg = np.zeros(self.ols_size, dtype=np.complex64)
-        seg[: self.n_hist] = self.white(h - 1)[self.hop - self.n_hist :]
-        seg[self.n_hist : self.n_hist + self.hop] = self.white(h)
-        y = sfft.ifft(sfft.fft(seg) * self.taps_f)
-        return np.asarray(y[self.n_hist : self.n_hist + self.hop], dtype=np.complex64)
-
-    def adc(self, y: np.ndarray) -> np.ndarray:
-        """Interleaved uint8 I, Q: clip(rint(127.5 + G * y), 0, 255)."""
-        v = np.ascontiguousarray(y, dtype=np.complex64).view(np.float32) * np.float32(self.gain)
-        v += np.float32(127.5)
-        np.rint(v, out=v)
-        np.clip(v, 0, 255, out=v)
-        return v.astype(np.uint8)
+    def adc(self, y: np.ndarray, add: np.ndarray | None = None, out: np.ndarray | None = None) -> np.ndarray:
+        """Interleaved uint8 I, Q: clip(rint(127.5 + G * (y + add)), 0, 255)."""
+        return self.dsp.adc(y, self.gain, add, out)

@@ -17,13 +17,13 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from assist.timebase import format_iso, parse_tz
 
 if TYPE_CHECKING:
     from pathlib import Path
     from typing import BinaryIO
-
-    import numpy as np
 
 SPLIT_S = 600
 FORMATS = ("wav", "rf64", "cu8")
@@ -117,7 +117,7 @@ class FileSink:
         self._left = of.n_samples
 
     def write(self, u8: np.ndarray) -> None:
-        buf = memoryview(u8.tobytes())
+        buf = memoryview(np.ascontiguousarray(u8, dtype=np.uint8)).cast("B")  # no copy for a contiguous piece
         while len(buf):
             if self._left == 0:
                 self._next()

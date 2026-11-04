@@ -14,6 +14,11 @@ absolute time, never on where a render starts (window independence, T-WIN):
 Both are linearly interpolated to the narrow rate. The schedule envelope (with its 5 ms ramps), the AM gain and
 the horizon mask are evaluated directly at the narrow rate.
 
+**Narrow stream** (M5): per chunk c, one vectorised pass gives the narrow samples of all its OLA blocks 100c ..
+100c + 99, i.e. narrow indices [100c L/2, (100c + 101) L/2) (L/2 = rate / 100, so the stream starts at Unix
+second c), plus a flag per block saying whether the emitter is active in it. Every value depends only on the chunk
+and the absolute index, so the same samples come out whichever window is rendered.
+
 **Narrow rate** (plan §4.2): r >= 1.25 (B + 2 max|f_rx - f_bin|), a multiple of 100 Hz with an FFT-friendly block
 length. The excursion bound covers the bin rounding, Doppler at the orbit's perigee speed (plus Earth rotation),
 6 sigma of the per-pass offset and the drift over 30 min. Each chunk checks the actual excursion and fails loudly
@@ -29,7 +34,6 @@ import numpy as np
 import scipy.fft as sfft
 
 from assist.emitters.link import C_M_S
-from assist.engine.synth import hann
 from assist.orbits.geometry import BLOCK_S
 
 if TYPE_CHECKING:
@@ -73,10 +77,6 @@ def narrow_rate(bandwidth_hz: float, excursion_hz: float, preferred: int, fs: in
         r += 100
 
 
-def _overlaps(intervals: list[tuple[float, float]], a: float, b: float) -> bool:
-    return any(lo < b and hi > a for lo, hi in intervals)
-
-
 def _intersect(xs: list[tuple[float, float]], ys: list[tuple[float, float]]) -> list[tuple[float, float]]:
     out = []
     for a0, a1 in xs:
@@ -94,6 +94,14 @@ class Control:
     cyc: np.ndarray  # carrier phase in cycles relative to f_bin (a whole number of cycles removed)
     visible: list[tuple[float, float]]  # (aos, los) of the passes overlapping the chunk
     active: list[tuple[float, float]]  # where the emitter may be non-zero: visible and schedule active
+
+
+@dataclass(frozen=True)
+class Stream:
+    """An emitter's narrow samples for the OLA blocks of one chunk (plan §4.2), before the Hann window."""
+
+    x: np.ndarray  # complex64: 101 * L / 2 samples from narrow index 100 c L / 2 (blocks 100c .. 100c + 99)
+    active: np.ndarray  # uint8 per block: block 100c + i is synthesised only where active[i]
 
 
 class EmitterRender:
@@ -121,23 +129,35 @@ class EmitterRender:
         self.n = self.rate * m // fs  # narrow samples per block
         self.limit_hz = (self.rate / RATE_MARGIN - self.bandwidth_hz) / 2
         self._ctl: OrderedDict[int, Control] = OrderedDict()
+        self._streams: OrderedDict[int, Stream | None] = OrderedDict()
         self._hours: OrderedDict[int, list[Pass]] = OrderedDict()
 
     @property
     def id(self) -> str:
         return f"{self.em.source_id}/{self.em.id}"
 
+    def _hour_passes(self, hr: int) -> list[Pass]:
+        """Complete passes overlapping UTC hour hr (geometry for that hour, and the next if a pass runs on)."""
+        ps = self._hours.get(hr)
+        if ps is None:
+            ps = self.em.platform.passes(float(hr * BLOCK_S), float((hr + 1) * BLOCK_S))
+            self._hours[hr] = ps
+            while len(self._hours) > 4:
+                self._hours.popitem(last=False)
+        return ps
+
+    def has_hour(self, hr: int) -> bool:
+        return hr in self._hours
+
+    def prefetch_hour(self, hr: int) -> None:
+        """Compute hour hr's passes (and the geometry under them) ahead of need (live serving, plan §4.5)."""
+        self._hour_passes(hr)
+
     def _passes(self, t0: float, t1: float) -> list[Pass]:
         """Complete passes overlapping [t0, t1), computed once per UTC hour."""
         found: dict[float, Pass] = {}
         for hr in range(math.floor(t0 / BLOCK_S), math.floor(t1 / BLOCK_S) + 1):
-            ps = self._hours.get(hr)
-            if ps is None:
-                ps = self.em.platform.passes(float(hr * BLOCK_S), float((hr + 1) * BLOCK_S))
-                self._hours[hr] = ps
-                while len(self._hours) > 4:
-                    self._hours.popitem(last=False)
-            for p in ps:
+            for p in self._hour_passes(hr):
                 if p.los > t0 and p.aos < t1:
                     found[p.aos] = p
         return [found[k] for k in sorted(found)]
@@ -204,17 +224,32 @@ class EmitterRender:
                     f"(narrow rate {self.rate} Hz)"
                 )
 
-    def block(self, b: int) -> np.ndarray | None:
-        """Windowed narrow block v of OLA block b (complex64, n samples), or None when silent throughout."""
-        ctl = self.control(b // HOPS_PER_CHUNK)
+    def stream(self, chunk: int) -> Stream | None:
+        """Narrow samples of chunk `chunk`'s blocks, or None when the emitter is silent in all of them."""
+        if chunk in self._streams:
+            return self._streams[chunk]
+        st = self._compute_stream(chunk)
+        self._streams[chunk] = st
+        while len(self._streams) > 2:
+            self._streams.popitem(last=False)
+        return st
+
+    def _compute_stream(self, chunk: int) -> Stream | None:
+        ctl = self.control(chunk)
+        b = HOPS_PER_CHUNK * chunk + np.arange(HOPS_PER_CHUNK, dtype=np.int64)
         tb0 = b * self.hop / self.fs
         tb1 = (b * self.hop + self.m) / self.fs
-        if not _overlaps(ctl.active, tb0, tb1):
+        active = np.zeros(HOPS_PER_CHUNK, dtype=bool)
+        for a, z in ctl.active:
+            active |= (tb0 < z) & (tb1 > a)
+        if not active.any():
             return None
-        n0 = b * (self.n // 2)
-        j = np.arange(self.n)
+        half = self.n // 2
+        k = (HOPS_PER_CHUNK + 1) * half
+        n0 = HOPS_PER_CHUNK * chunk * half  # narrow index of Unix second `chunk`
+        j = np.arange(k, dtype=np.int64)
         t = (n0 + j) / self.rate
-        pos = (b * self.hop_ms - ctl.k0) + j * (1000.0 / self.rate)
+        pos = j * (1000.0 / self.rate)  # ms from the chunk's first control sample (k0 = 1000 chunk)
         grid = np.arange(len(ctl.amp), dtype=np.float64)
         amp = np.interp(pos, grid, ctl.amp)
         cyc = np.interp(pos, grid, ctl.cyc)
@@ -224,6 +259,6 @@ class EmitterRender:
         env = self.em.schedule.envelope(t) * vis
         if self.em.am is not None:
             env = env * 10 ** (self.em.am.gain_db(t) / 20)
-        x = self.signal.render(n0, self.n, self.rate)
-        v = x * (amp * env * hann(self.n)) * np.exp(2j * np.pi * cyc)
-        return v.astype(np.complex64)
+        x = self.signal.render(n0, k, self.rate)
+        v = x * (amp * env) * np.exp(2j * np.pi * cyc)
+        return Stream(v.astype(np.complex64), active.astype(np.uint8))

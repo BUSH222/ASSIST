@@ -28,5 +28,12 @@ class KeyedRng:
 
     def stream(self, *key: str | int) -> np.random.Generator:
         """Generator(Philox(SeedSequence(seed, spawn_key=h(key)))): the same key always gives the same stream."""
-        ss = np.random.SeedSequence(self.seed, spawn_key=tuple(key_int(k) for k in key))
-        return np.random.Generator(np.random.Philox(ss))
+        return np.random.Generator(np.random.Philox(self._seq(key)))
+
+    def key64(self, *key: str | int) -> int:
+        """A 64-bit key from the same seed sequence, for counter-based generators outside numpy (the C++ noise,
+        whose counter is the absolute hop index, plan §3.2)."""
+        return int(self._seq(key).generate_state(1, np.uint64)[0])
+
+    def _seq(self, key: tuple[str | int, ...]) -> np.random.SeedSequence:
+        return np.random.SeedSequence(self.seed, spawn_key=tuple(key_int(k) for k in key))

@@ -1,0 +1,126 @@
+# Benchmark scenario (M5): 20 CW carriers plus profile-shaped noise, the worst case for ~20 sources: all 20 are
+# above the horizon and on for the whole 8 min clock (12:00-12:08 UTC), so every second synthesises 20 emitters.
+# Carriers every 110 kHz from 135.957 to 138.047 MHz (clear of the DC bin at 137.000 MHz), zombie preset
+# (45 dB-Hz at zenith, per-pass offset and drift), schedule continuous; the even ones without AM, the odd ones
+# with the preset's (7.5 s / 6 dB). Passes rise between 11:54 and 11:58 UTC, 20-77 deg, alternating directions.
+# Until M6 there are no modulated signals; station_default.yaml (M9) becomes the full benchmark.
+#
+# From the repository root:
+#   uv run assist bench  scenarios/bench_cw20.yaml                      # 60 s: 1 worker and all CPUs
+#   uv run assist bench  scenarios/bench_cw20.yaml --duration 5min --workers 6
+#   uv run assist render scenarios/bench_cw20.yaml -o out/bench_cw20    # 8 min, one WAV file
+version: 1
+seed: 5
+clock: {start: "2026-11-04T12:00:00Z", duration: 8min}
+profile: profiles/vhf137
+sources:
+  - id: c00
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -2min, max_el_deg: 20, direction: desc, side: west}}
+    freq_hz: 135.957e6
+    schedule: {type: continuous}
+    am: null
+  - id: c01
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -3min, max_el_deg: 23, direction: asc, side: west}}
+    freq_hz: 136.067e6
+    schedule: {type: continuous}
+  - id: c02
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -4min, max_el_deg: 26, direction: desc, side: east}}
+    freq_hz: 136.177e6
+    schedule: {type: continuous}
+    am: null
+  - id: c03
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -5min, max_el_deg: 29, direction: asc, side: east}}
+    freq_hz: 136.287e6
+    schedule: {type: continuous}
+  - id: c04
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -6min, max_el_deg: 32, direction: desc, side: west}}
+    freq_hz: 136.397e6
+    schedule: {type: continuous}
+    am: null
+  - id: c05
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -2min, max_el_deg: 35, direction: asc, side: west}}
+    freq_hz: 136.507e6
+    schedule: {type: continuous}
+  - id: c06
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -3min, max_el_deg: 38, direction: desc, side: east}}
+    freq_hz: 136.617e6
+    schedule: {type: continuous}
+    am: null
+  - id: c07
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -4min, max_el_deg: 41, direction: asc, side: east}}
+    freq_hz: 136.727e6
+    schedule: {type: continuous}
+  - id: c08
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -5min, max_el_deg: 44, direction: desc, side: west}}
+    freq_hz: 136.837e6
+    schedule: {type: continuous}
+    am: null
+  - id: c09
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -6min, max_el_deg: 47, direction: asc, side: west}}
+    freq_hz: 136.947e6
+    schedule: {type: continuous}
+  - id: c10
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -2min, max_el_deg: 50, direction: desc, side: east}}
+    freq_hz: 137.057e6
+    schedule: {type: continuous}
+    am: null
+  - id: c11
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -3min, max_el_deg: 53, direction: asc, side: east}}
+    freq_hz: 137.167e6
+    schedule: {type: continuous}
+  - id: c12
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -4min, max_el_deg: 56, direction: desc, side: west}}
+    freq_hz: 137.277e6
+    schedule: {type: continuous}
+    am: null
+  - id: c13
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -5min, max_el_deg: 59, direction: asc, side: west}}
+    freq_hz: 137.387e6
+    schedule: {type: continuous}
+  - id: c14
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -6min, max_el_deg: 62, direction: desc, side: east}}
+    freq_hz: 137.497e6
+    schedule: {type: continuous}
+    am: null
+  - id: c15
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -2min, max_el_deg: 65, direction: asc, side: east}}
+    freq_hz: 137.607e6
+    schedule: {type: continuous}
+  - id: c16
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -3min, max_el_deg: 68, direction: desc, side: west}}
+    freq_hz: 137.717e6
+    schedule: {type: continuous}
+    am: null
+  - id: c17
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -4min, max_el_deg: 71, direction: asc, side: west}}
+    freq_hz: 137.827e6
+    schedule: {type: continuous}
+  - id: c18
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -5min, max_el_deg: 74, direction: desc, side: east}}
+    freq_hz: 137.937e6
+    schedule: {type: continuous}
+    am: null
+  - id: c19
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -6min, max_el_deg: 77, direction: asc, side: east}}
+    freq_hz: 138.047e6
+    schedule: {type: continuous}
