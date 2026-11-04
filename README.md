@@ -6,11 +6,15 @@ ADRIFT can be tested against a sky whose content is known exactly.
 
 The implementation plan (`samples/plan.md`) and the per-milestone `checkpoint.md` are kept locally, not in git.
 
-Status: M5 (acceleration). Scenarios resolve to a self-contained document, the truth (frequencies, Doppler,
-geometry, levels, events) can be computed, and `cw` emitters (zombies) render to the station's uint8 IQ stream with
-profile-shaped noise. The stream is served over rtl_tcp in real time, or written as SDR++-style WAV or raw cu8 files.
-The DSP runs in C++ kernels (pocketfft): 20 carriers plus noise render at ~7.6x real time on one core, and files
-render in parallel worker processes (~26x on 6 cores, the same bytes for any number of workers).
+Status: M6 (satellite signals). Scenarios resolve to a self-contained document, the truth (frequencies, Doppler,
+geometry, levels, events) can be computed, and the station's uint8 IQ stream is rendered with profile-shaped noise.
+Signals: `cw` (zombies), METEOR LRPT (`oqpsk`, 72 ksym/s with CADU framing), ORBCOMM subscriber downlinks (`sdpsk`,
+4800 sym/s) and gateway bursts (`oqpsk_burst`), and LoRa bursts (`lora`, SpaceBEE-style); presets `meteor_lrpt`,
+`orbcomm`, `spacebee`, `zombie`. Payloads are random, so the signals are realistic at the spectrum and symbol level
+but not decodable. The stream is served over rtl_tcp in real time, or written as SDR++-style WAV or raw cu8 files.
+The DSP runs in C++ kernels (pocketfft): 20 carriers plus noise render at ~8x real time on one core, METEOR,
+ORBCOMM and LoRa together at ~5.8x, and files render in parallel worker processes (20-29x on 6 cores, the same bytes
+for any number of workers).
 
 ## Usage
 
@@ -24,12 +28,15 @@ uv run assist render   scenarios/zombie_single.yaml -o out/m3      # WAV files (
 uv run assist render   scenarios/zombie_single.yaml -o out/raw --format cu8 --from +7min --duration 90s --workers 2
 uv run assist bench    scenarios/bench_cw20.yaml [--duration 5min] # speed on 1 worker and on all CPUs, no files
 uv run assist serve    scenarios/serve_demo.yaml                 # rtl_tcp on 127.0.0.1:1234, live, until Ctrl-C
+uv run assist serve    scenarios/serve_satellites.yaml           # METEOR, ORBCOMM (+ gateway) and LoRa, live
 uv run assist schema                                          # JSON Schema of a scenario
 uv run assist elements fetch                                  # network: dated retlector.eu snapshots
 uv run assist profile  build | labels | report                # data survey of samples/ (M1)
 ```
 
-Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`).
+Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`). Named
+channels from `bands/vhf137/band.yaml` (ORBCOMM `S-1` .. `S-12`, `orbcomm_gateway`) can be used in a source's
+`channels` list, e.g. `channels: [S-5, S-8]` on an `orbcomm` source.
 Renders are byte-identical for the same scenario (on the same backend), whatever the number of workers, and any
 window equals the same slice of a longer render. WAV files
 are named like SDR++ recordings (`baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav`, station local time); `--rf64` writes
@@ -60,10 +67,11 @@ uv run pytest
   on 20 carriers). The noise generator gives the same bits on both; the rest agrees to float rounding, so rendered
   bytes differ by at most one count, in a few per million.
 - **C++ kernels** (`cpp/`): `synth` (overlap-add synthesis), `white`/`noise` (Philox4x32-10 + Box-Muller noise,
-  shaped by overlap-save), `adc`; pocketfft is vendored in `cpp/third_party/`. Each has a numpy twin, compared in
-  `tests/test_dsp_ref.py`.
+  shaped by overlap-save), `adc`; `random_bytes` (payloads), `shape` (pulse shaping), `chirp` (LoRa), `nco`
+  (carrier phase and level), `conv_encode` and `ccsds_randomise` (METEOR framing); pocketfft is vendored in
+  `cpp/third_party/`. Each has a numpy twin, compared in `tests/test_dsp_ref.py`.
 - **`ASSIST_NATIVE=ON uv sync --reinstall-package assist`** builds with `-march=native` (local use only);
   a plain `uv sync --reinstall-package assist` switches back.
 
-Large local data (recordings, waterfalls, element snapshots) lives in `samples/`, which is gitignored; tests never
-need it. Tool outputs go to `out/`, one-off temporary files to `temp/` (both gitignored).
+Large local data (recordings, waterfalls, element snapshots) lives in `samples/`, which is gitignored; CI tests
+never need it (`tests/test_m6_local.py` and `tests/test_render_local.py` run only where it, or a render, exists). Tool outputs go to `out/`, one-off temporary files to `temp/` (both gitignored).

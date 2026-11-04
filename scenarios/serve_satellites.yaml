@@ -1,0 +1,54 @@
+# Live rtl_tcp view of the M6 satellite signals (your SDR++ check). The clock starts `now` and the synthetic passes
+# are placed around the launch, so everything is up within the first minutes:
+#   met       METEOR LRPT on 137.9 MHz: AOS -4 min, 70 deg (up until about +11 min)
+#   oc1, oc2  ORBCOMM: subscriber SDPSK on S-2 (137.2250) + S-7 (137.6875) and S-4 (137.4400) + S-9 (137.7375), and
+#             gateway OQPSK bursts on 137.56 MHz (0.26-0.32 s every 0.95 s); AOS -3 min / +2 min
+#   sb1..sb4  LoRa on the lower channel, 137.099 MHz: one burst every ~3 min per satellite (SF 7..12, 10..60 bytes),
+#             so about one a minute in all; AOS -2, +1, +4 and +7 min
+# The ORBCOMM channels are clear of METEOR, LoRa and the gateway. After about +20 min only noise is left.
+#
+# From the repository root:
+#   uv run assist serve scenarios/serve_satellites.yaml          # 127.0.0.1:1234 until Ctrl-C
+#   uv run assist passes scenarios/serve_satellites.yaml         # pass times for this launch
+#   uv run assist truth scenarios/serve_satellites.yaml          # LoRa bursts (start, channel, SF) in the event list
+# SDR++: rtl_tcp source, host 127.0.0.1, port 1234, sample rate 2.4 MHz (the stream is fixed at 137.000 MHz).
+version: 1
+seed: 8
+clock: {start: now, duration: 1h}
+profile: profiles/vhf137
+sinks:
+  - rtl_tcp: {port: 1234}
+sources:
+  - id: met
+    preset: meteor_lrpt
+    orbit: {synthetic_pass: {aos: -4min, max_el_deg: 70, direction: desc, side: east}}
+  - id: oc1
+    preset: orbcomm
+    orbit: {synthetic_pass: {aos: -3min, max_el_deg: 55, direction: asc, side: west, alt_km: 750, inc_deg: 70}}
+    channels: [S-2, S-7]
+    gateway: {enabled: true}
+  - id: oc2
+    preset: orbcomm
+    orbit: {synthetic_pass: {aos: +2min, max_el_deg: 35, direction: desc, side: west, alt_km: 750, inc_deg: 70}}
+    channels: [S-4, S-9]
+    gateway: {enabled: true}
+  - id: sb1
+    preset: spacebee
+    orbit: {synthetic_pass: {aos: -2min, max_el_deg: 60, direction: asc, side: east, alt_km: 470, inc_deg: 97.3}}
+    freq_hz: 137.099e6
+  - id: sb2
+    preset: spacebee
+    orbit: {synthetic_pass: {aos: +1min, max_el_deg: 40, direction: desc, side: west, alt_km: 470, inc_deg: 97.3}}
+    freq_hz: 137.099e6
+  - id: sb3
+    preset: spacebee
+    orbit: {synthetic_pass: {aos: +4min, max_el_deg: 75, direction: desc, side: east, alt_km: 470, inc_deg: 97.3}}
+    freq_hz: 137.099e6
+  - id: sb4
+    preset: spacebee
+    orbit: {synthetic_pass: {aos: +7min, max_el_deg: 30, direction: asc, side: west, alt_km: 470, inc_deg: 97.3}}
+    freq_hz: 137.099e6
+  - id: z1
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -1min, max_el_deg: 45, direction: desc, side: east}}
+    freq_hz: 136.35e6

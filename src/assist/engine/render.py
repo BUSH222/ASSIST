@@ -30,7 +30,7 @@ from assist.engine.control import HOPS_PER_CHUNK, EmitterRender
 from assist.engine.frontend import Frontend, noise_spec
 from assist.engine.synth import synth_blocks
 from assist.orbits.geometry import BLOCK_S
-from assist.signals.base import make_signal
+from assist.signals.base import Keys, make_signal
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -81,8 +81,9 @@ class Renderer:
         for src in scene.sources:
             params = {e.id: e.signal.params for e in src.config.emitters}
             for em in src.emitters:
-                sig = make_signal(em.signal_kind, params[em.id])
-                self.emitters.append(EmitterRender(em, sig, fe.fc_hz, self.fs, self.hop, self.m))
+                sig = make_signal(em.signal_kind, params[em.id], Keys(scene.rng, src.id, em.id), self.dsp)
+                for ch in range(len(em.channels_mhz)):  # one per frequency (LoRa channels)
+                    self.emitters.append(EmitterRender(em, sig, fe.fc_hz, self.fs, self.hop, self.m, self.dsp, ch))
         self.times: dict[str, float] = dict.fromkeys(STAGES, 0.0)  # seconds spent per stage (bench)
         self._tails: OrderedDict[int, np.ndarray | None] = OrderedDict()
         self._sig: tuple[int, np.ndarray | None] | None = None

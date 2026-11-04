@@ -5,7 +5,8 @@ in everything that depends on files or draws:
 - clock start (`now` -> the current UTC second), station position (file or fallback);
 - the element set of every catalog orbit, embedded as an OMM dict (nearest the clock start, or `orbit.epoch`);
 - synthetic passes: absolute AOS, direction/side (keyed draws if absent) and the solved orbit;
-- keyed defaults: on/off phase, AM phase; frequencies quantised to 1 mHz;
+- keyed defaults: on/off phase, AM phase; channels (names from the band's channel table, e.g. ORBCOMM S-1 .. S-12)
+  turned into frequencies, an emitter's `channel` into its freq_hz; frequencies quantised to 1 mHz;
 - levels as p_tx_dbw (from p_tx_dbw, cn0_zenith_dbhz or a calibration);
 - package version and content hashes of the band and profile.
 
@@ -35,6 +36,7 @@ from assist.timebase import format_iso, parse_iso, parse_time
 
 MU_KM3_S2 = 398600.8
 METEOR_BAND_HZ = 100e3  # M1 P10 measured SNR in 137.9 +- 50 kHz
+METEOR_AUTO = "meteor_auto"  # the per-satellite METEOR calibration of the source's NORAD id, else `meteor`
 
 
 @dataclass
@@ -156,7 +158,11 @@ class _Ctx:
     def cal(self) -> tuple[dict[str, float], str]:
         if self._cal is None:
             prof = str(self.base / self.sc.profile) if self.sc.profile else None
-            self._cal = calibrations(prof, self.band)
+            table, _ = calibrations(prof, self.band)
+            # Name the source as the scenario does (not the absolute path), so the resolved document, and with it
+            # the scenario hash, is the same in every checkout.
+            where = f"profile {self.sc.profile}" if self.sc.profile else f"band {self.band.get('name', '')}"
+            self._cal = (table, where)
         return self._cal
 
     def uniform(self, sid: str, path: str, lo: float, hi: float) -> float:
@@ -213,26 +219,60 @@ def _level(cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: flo
         p = link.p_tx_for_cn0_zenith(
             lv.cn0_zenith_dbhz,
             h,
-            e.freq_hz,
+            e.freqs_hz[0],
             pattern_of(e.pattern),
             pattern_of(cx.sc.antenna.pattern),
             t_sys,
             lv.extra_loss_db,
         )
         how = f"cn0_zenith_dbhz {lv.cn0_zenith_dbhz} at {h / 1000:.1f} km, T_sys {t_sys:.1f} K"
+        if len(e.freqs_hz) > 1:
+            how += f" (at {e.freqs_hz[0] / 1e6:.4f} MHz, the first frequency)"
     else:
         table, where = cx.cal()
+        cal = str(lv.cal)
+        if cal == METEOR_AUTO:
+            norad = orbit.norad if isinstance(orbit, S.CatalogOrbit) else None
+            by_norad = {int(v["norad"]): k for k, v in cx.band.get("calibrations", {}).items() if "norad" in v}
+            cal = by_norad.get(norad, "meteor") if norad is not None else "meteor"
+            lv = lv.model_copy(update={"cal": cal})
         if lv.cal not in table:
             raise ConfigError(f"source {src.id}: unknown calibration {lv.cal!r} in {where} (known: {sorted(table)})")
         k = table[str(lv.cal)]
         p = link.p_tx_from_link_const(k, t_sys)
         how = f"cal {lv.cal} from {where}: link constant {k:.3f} dB-Hz, T_sys {t_sys:.1f} K"
+        if e.level.cal == METEOR_AUTO:
+            how = f"cal {METEOR_AUTO} -> {how}"
     return S.Level(p_tx_dbw=p, extra_loss_db=lv.extra_loss_db, resolved_from=how)
 
 
-def _emitter(cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: float) -> S.Emitter:
+def _mhz_round(f: float) -> float:
+    return round(f * 1000) / 1000
+
+
+def channel_hz(band: dict[str, Any], name: str, sid: str) -> float:
+    table = band.get("channels", {})
+    if name not in table:
+        raise ConfigError(f"source {sid}: unknown channel {name!r} (band channels: {', '.join(table)})")
+    return float(table[name])
+
+
+def _channels(cx: _Ctx, src: S.Source) -> list[float | str] | None:
+    if src.channels is None:
+        return None
+    return [_mhz_round(channel_hz(cx.band, c, src.id) if isinstance(c, str) else float(c)) for c in src.channels]
+
+
+def _emitter(
+    cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: float, channels: list[float | str] | None
+) -> S.Emitter:
+    if e.channel is not None:
+        ch = e.channel
+        f = channel_hz(cx.band, ch, src.id) if isinstance(ch, str) else float((channels or [])[ch])
+        e = e.model_copy(update={"freq_hz": f, "channel": None})
+    freq = [_mhz_round(f) for f in e.freqs_hz]
+    e = e.model_copy(update={"freq_hz": freq if isinstance(e.freq_hz, list) else freq[0]})
     upd: dict[str, Any] = {
-        "freq_hz": round(e.freq_hz * 1000) / 1000,
         "offset_hz": round(e.offset_hz * 1000) / 1000,
         "level": _level(cx, src, orbit, e, station_alt_m),
     }
@@ -266,9 +306,18 @@ def resolve_document(doc: dict[str, Any], base: Path, now: float | None = None) 
         norad = src.catalog_norad
         if in_cat and not catalog and norad is None:
             norad = synthetic_norad(src.id)
-        ems = [_emitter(cx, src, orbit, e, station.alt_m) for e in src.emitters]
+        channels = _channels(cx, src)
+        ems = [_emitter(cx, src, orbit, e, station.alt_m, channels) for e in src.emitters]
         sources.append(
-            src.model_copy(update={"orbit": orbit, "in_catalog": in_cat, "catalog_norad": norad, "emitters": ems})
+            src.model_copy(
+                update={
+                    "orbit": orbit,
+                    "in_catalog": in_cat,
+                    "catalog_norad": norad,
+                    "channels": channels,
+                    "emitters": ems,
+                }
+            )
         )
     _check_norads(sources)
     prof = base / sc.profile if sc.profile else None

@@ -43,3 +43,25 @@ def noise(
 
 def adc(x: ArrayLike, gain: float, add: ArrayLike | None = None, out: np.ndarray | None = None) -> NDArray[np.uint8]:
     """Interleaved uint8 I, Q: clip(rint(127.5 + gain * (x + add)), 0, 255)."""
+
+def random_bytes(key: int, block: int, n: int) -> NDArray[np.uint8]:
+    """n random bytes of block `block` (Philox4x32-10, counter (i, 0, block))."""
+
+def conv_encode(bits: ArrayLike, state: int = 0) -> NDArray[np.uint8]:
+    """K = 7, r = 1/2 convolutional code (171, 133 octal) of 0/1 bits; state = previous 6 input bits."""
+
+def ccsds_randomise(data: ArrayLike) -> NDArray[np.uint8]:
+    """XOR with the CCSDS randomiser sequence (FF 48 0E ...)."""
+
+def shape(
+    si: ArrayLike, sq: ArrayLike, k0: int, h: ArrayLike, sps: int, qd: int, n0: int, n: int
+) -> NDArray[np.complex64]:
+    """Pulse shaping of symbols k0 .. into samples n0 .. n0 + n - 1."""
+
+def chirp(
+    start: ArrayLike, length: ArrayLike, val: ArrayLike, sf: int, bw: float, t0: float, dt: float, n: int
+) -> NDArray[np.complex64]:
+    """A LoRa burst from chirp segments, sampled at t0 + j dt."""
+
+def nco(x: ArrayLike | None, gain: ArrayLike, cyc: ArrayLike, out: np.ndarray | None = None) -> NDArray[np.complex64]:
+    """x * gain * exp(2 pi i cyc) as complex64 (x None: a constant 1)."""

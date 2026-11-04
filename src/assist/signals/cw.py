@@ -4,11 +4,17 @@ from typing import override
 
 import numpy as np
 
-from assist.signals.base import Signal
+from assist.signals.base import Signal, SignalParams
+
+
+class CwParams(SignalParams):
+    pass
 
 
 class CW(Signal):
     kind = "cw"
+    Params = CwParams
+    constant = True
 
     @override
     def bandwidth_hz(self) -> float:

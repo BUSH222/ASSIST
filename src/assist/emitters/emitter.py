@@ -1,7 +1,8 @@
 """Emitter (plan §3.4): signal + carrier + schedule + level + pattern on a platform, and its truth.
 
 Truth values follow the plan's definitions:
-- f_rest = f_nominal + offset_hz; f_tx adds the per-pass offset and drift (§6.3).
+- f_rest = f_nominal + offset_hz; f_tx adds the per-pass offset and drift (§6.3). An event emitter with several
+  frequencies (LoRa channels) has one f_rest per frequency; each event's parameters say which (`channel`).
 - doppler = -f_tx * range_rate / c (first order, geometry at reception time, §4.1); f_rx = f_tx + doppler.
 - rx_dbm from the link budget (§6.2) with the AM gain at that instant; cn0 = rx_dbm - 30 - 10 log10(k T_sys).
 - active_fraction: share of [t, t + step) during which the schedule is on (half-amplitude edges).
@@ -69,28 +70,44 @@ class Emitter:
     rx_pattern: link.Pattern
     t_sys_k: float
     horizon: link.HorizonModel
+    freqs_mhz: tuple[int, ...] = ()  # rest frequency per channel (f_nominal + offset); () = just carrier.rest_mhz
 
     @property
     def is_event(self) -> bool:
         return self.schedule.is_event
 
-    def link_dbm(self, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray) -> np.ndarray:
-        """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2)."""
+    @property
+    def channels_mhz(self) -> tuple[int, ...]:
+        return self.freqs_mhz or (self.carrier.rest_mhz,)
+
+    def event_channel(self, ev: Event) -> int:
+        return int(ev.params.get("channel", 0))
+
+    def link_dbm(
+        self, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray, f_mhz: int | None = None
+    ) -> np.ndarray:
+        """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2); at f_mhz if given."""
         return link.p_rx_dbm(
             self.p_tx_dbw,
             self.tx_pattern.gain_db(off_nadir),
             rng_m,
-            self.carrier.rest_mhz / 1000.0,
+            (self.carrier.rest_mhz if f_mhz is None else f_mhz) / 1000.0,
             self.rx_pattern.gain_db(90.0 - el),
             self.horizon.loss_db(az, el),
             self.extra_loss_db,
         )
 
     def level(
-        self, t: np.ndarray, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray
+        self,
+        t: np.ndarray,
+        el: np.ndarray,
+        az: np.ndarray,
+        rng_m: np.ndarray,
+        off_nadir: np.ndarray,
+        f_mhz: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """(rx_dbm, cn0_dbhz) at the given geometry, including AM."""
-        rx = self.link_dbm(el, az, rng_m, off_nadir)
+        rx = self.link_dbm(el, az, rng_m, off_nadir, f_mhz)
         if self.am is not None:
             rx = rx + self.am.gain_db(t)
         return rx, rx - 30 - link.kt_dbw_hz(self.t_sys_k)
@@ -142,16 +159,29 @@ class Emitter:
         )
 
     def event_truth(self, t0: float, t1: float) -> list[EventTruth]:
-        """Events overlapping [t0, t1) whose midpoint is above the horizon; frequency and level at the midpoint."""
+        """Events overlapping [t0, t1) whose midpoint is above the horizon; frequency and level at the midpoint
+        (each on its own channel)."""
         events = self.schedule.events(t0, t1)
         if not events:
             return []
         mid = np.array([(e.start + e.end) / 2 for e in events])
         tr = self.truth(mid, 1.0)
         at = {float(x): i for i, x in enumerate(tr.t)}
+        chans = self.channels_mhz
         out = []
         for e, m in zip(events, mid, strict=True):
             i = at.get(float(m))
-            if i is not None:
+            if i is None:
+                continue
+            shift = chans[self.event_channel(e)] - self.carrier.rest_mhz  # mHz
+            if shift == 0:
                 out.append(EventTruth(e, int(tr.f_rx_mhz[i]), float(tr.rx_dbm[i])))
+                continue
+            f_tx_hz = float(tr.f_tx_hz[i]) + shift / 1000.0
+            doppler_mhz = round(-f_tx_hz * float(tr.range_rate_m_s[i]) / link.C_M_S * 1000)
+            g = self.platform.geometry(np.array([m]))
+            rx, _ = self.level(
+                np.array([m]), g.el_deg, g.az_deg, g.range_m, g.off_nadir_deg, chans[self.event_channel(e)]
+            )
+            out.append(EventTruth(e, int(tr.f_tx_mhz[i]) + shift + doppler_mhz, float(rx[0])))
         return out

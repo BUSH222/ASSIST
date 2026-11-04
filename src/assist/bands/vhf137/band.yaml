@@ -21,9 +21,26 @@ noise:
   sigma_counts: 26.687
 # Calibrated levels, used when a scenario has no profile. Link constant = the C/N0 (dB-Hz) the link would give at
 # 0 dB total path gain (G_tx + G_rx - FSPL = 0); P_tx = link constant + 10 log10(k T_sys), so the calibrated SNR
-# holds for any T_ant. Copied from profiles/vhf137 (a test checks they match).
+# holds for any T_ant. Copied from profiles/vhf137 (a test checks they match). `cal: meteor_auto` picks the entry
+# whose `norad` is the source's catalog object, else `meteor`.
 calibrations:
-  meteor_m2_3: {link_const_dbhz: 197.759}   # M1 P10, C = 147.736 dB in 100 kHz
-  meteor_m2_4: {link_const_dbhz: 199.762}   # M1 P10, C = 149.739 dB in 100 kHz
+  meteor_m2_3: {link_const_dbhz: 197.759, norad: 57166}   # M1 P10, C = 147.736 dB in 100 kHz
+  meteor_m2_4: {link_const_dbhz: 199.762, norad: 59051}   # M1 P10, C = 149.739 dB in 100 kHz
   meteor: {link_const_dbhz: 198.796}        # M1 P10, both satellites
   orbcomm: {link_const_dbhz: 191.600}       # M2 from M1 P2b: FM117 C/N0 at 0-10.6 deg elevation (mean of 2 channels)
+# Named channels (Hz). A source's `channels` list and an emitter's `channel` can name them (plan §6.5).
+# ORBCOMM: subscriber downlinks S-1..S-12 and the gateway downlink, from the channel table you supplied (2026-11-04).
+channels:
+  S-1: 137.2000e6
+  S-2: 137.2250e6
+  S-3: 137.2500e6
+  S-4: 137.4400e6
+  S-5: 137.4600e6
+  S-6: 137.6625e6
+  S-7: 137.6875e6
+  S-8: 137.7125e6
+  S-9: 137.7375e6
+  S-10: 137.8000e6
+  S-11: 137.2875e6
+  S-12: 137.3125e6
+  orbcomm_gateway: 137.5600e6

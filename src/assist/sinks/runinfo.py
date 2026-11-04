@@ -20,10 +20,10 @@ if TYPE_CHECKING:
 
 
 def engine_name(rd: Renderer) -> str:
-    """The kernels behind a render: "c++ (M5)" (with "-march=native" when built so), or "numpy reference (M5)"."""
+    """The kernels behind a render: "c++ (M6)" (with "-march=native" when built so), or "numpy reference (M6)"."""
     if rd.dsp.__name__ == "assist.dsp_ref":
-        return "numpy reference (M5)"
-    return "c++, -march=native (M5)" if getattr(rd.dsp, "_native", False) else "c++ (M5)"
+        return "numpy reference (M6)"
+    return "c++, -march=native (M6)" if getattr(rd.dsp, "_native", False) else "c++ (M6)"
 
 
 def run_info(

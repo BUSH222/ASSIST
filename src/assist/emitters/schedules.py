@@ -9,6 +9,10 @@ All schedules are functions of absolute Unix time, so any window can be evaluate
   starts a fresh chain at slot start + one gap, so slots are independent (random access).
 - `poisson_events`: per hour slot, N ~ Poisson(rate for that UTC hour), starts uniform in the hour, durations from
   the configured distribution (clipped to max_s <= 1 h). Same keyed stream per slot.
+
+Event signals (LoRa, M6) set an event maker: each event's duration and parameters (spreading factor, payload
+length, the frequency index of a multi-frequency emitter) come from it, drawn from the same slot stream in place of
+the duration distribution.
 """
 
 import math
@@ -19,9 +23,10 @@ from typing import TYPE_CHECKING, Any, override
 import numpy as np
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from assist.rng import KeyedRng
+
 
 SLOT_S = 3600
 
@@ -31,6 +36,14 @@ class Event:
     start: float
     end: float
     params: dict[str, Any] = field(default_factory=dict, compare=False)
+
+
+@dataclass(frozen=True)
+class EventMaker:
+    """Draws one event's (duration in s, parameters) from the slot stream; upper_s bounds the durations."""
+
+    draw: Callable[[np.random.Generator], tuple[float, dict[str, Any]]]
+    upper_s: float
 
 
 @dataclass(frozen=True)
@@ -152,9 +165,26 @@ class OnOff(Schedule):
 class _EventSchedule(Schedule):
     is_event = True
 
-    def __init__(self, rng: KeyedRng, source_id: str, emitter_id: str, duration: DurationDist) -> None:
+    def __init__(
+        self, rng: KeyedRng, source_id: str, emitter_id: str, duration: DurationDist, maker: EventMaker | None = None
+    ) -> None:
         self.rng, self.source_id, self.emitter_id, self.duration = rng, source_id, emitter_id, duration
+        self.maker = maker
         self._slots: dict[int, list[Event]] = {}
+
+    @property
+    def upper_s(self) -> float:
+        """Longest possible event."""
+        return self.maker.upper_s if self.maker is not None else self.duration.upper_s
+
+    def _event(self, g: np.random.Generator, t: float) -> Event:
+        """An event starting at t, its duration and parameters from the maker (or the duration distribution)."""
+        if self.maker is not None:
+            d, params = self.maker.draw(g)
+        else:
+            d = float(self.duration.draw(g, 1)[0])
+            params = {"duration_s": d}
+        return Event(t, t + d, params)
 
     @abstractmethod
     def _slot_events(self, g: np.random.Generator, slot: int) -> list[Event]: ...
@@ -169,7 +199,7 @@ class _EventSchedule(Schedule):
     @override
     def events(self, t0: float, t1: float) -> list[Event]:
         """Events overlapping [t0, t1), ordered by start."""
-        h0 = math.floor((t0 - self.duration.upper_s) / SLOT_S)
+        h0 = math.floor((t0 - self.upper_s) / SLOT_S)
         out = [e for h in range(h0, math.floor(t1 / SLOT_S) + 1) for e in self.slot(h) if e.end > t0 and e.start < t1]
         return sorted(out, key=lambda e: e.start)
 
@@ -207,12 +237,13 @@ class ExpGaps(_EventSchedule):
         duration: DurationDist,
         mean_gap_s: float = 180.0,
         min_gap_s: float = 20.0,
+        maker: EventMaker | None = None,
     ) -> None:
         if not 0 <= min_gap_s <= mean_gap_s:
             raise ValueError("exp_gaps needs 0 <= min_gap_s <= mean_gap_s")
-        if duration.upper_s > min_gap_s:
+        super().__init__(rng, source_id, emitter_id, duration, maker)
+        if self.upper_s > min_gap_s:
             raise ValueError("exp_gaps: event durations (max_s) must not exceed min_gap_s, or slots could overlap")
-        super().__init__(rng, source_id, emitter_id, duration)
         self.mean_gap_s, self.min_gap_s = mean_gap_s, min_gap_s
 
     def _gap(self, g: np.random.Generator) -> float:
@@ -224,9 +255,9 @@ class ExpGaps(_EventSchedule):
         t = slot * SLOT_S + self._gap(g)
         out = []
         while t < end_slot:
-            d = float(self.duration.draw(g, 1)[0])
-            out.append(Event(t, t + d, {"duration_s": d}))
-            t = t + d + self._gap(g)
+            ev = self._event(g, t)
+            out.append(ev)
+            t = ev.end + self._gap(g)
         return out
 
 
@@ -238,10 +269,11 @@ class PoissonEvents(_EventSchedule):
         emitter_id: str,
         duration: DurationDist,
         rate_per_hour: float | Sequence[float] = 1.0,
+        maker: EventMaker | None = None,
     ) -> None:
-        if duration.upper_s > SLOT_S:
+        super().__init__(rng, source_id, emitter_id, duration, maker)
+        if self.upper_s > SLOT_S:
             raise ValueError("poisson_events: max_s must be <= 3600 s")
-        super().__init__(rng, source_id, emitter_id, duration)
         self.rate_per_hour = rate_per_hour
 
     def rate(self, slot: int) -> float:
@@ -252,6 +284,8 @@ class PoissonEvents(_EventSchedule):
     def _slot_events(self, g: np.random.Generator, slot: int) -> list[Event]:
         n = int(g.poisson(self.rate(slot)))
         starts = np.sort(g.uniform(0.0, SLOT_S, n)) + slot * SLOT_S
+        if self.maker is not None:
+            return [self._event(g, float(s)) for s in starts]
         durs = self.duration.draw(g, n)
         return [Event(float(s), float(s + d), {"duration_s": float(d)}) for s, d in zip(starts, durs, strict=True)]
 

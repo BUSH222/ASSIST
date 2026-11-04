@@ -92,7 +92,7 @@ def test_render_workers_cli(scenario: Path, tmp_path: Path) -> None:
         )
         assert res.exit_code == 0, res.output
         run = json.loads((out / "run.json").read_text())
-        assert run["status"] == "complete" and run["workers"] == nw and run["engine"].endswith("(M5)")
+        assert run["status"] == "complete" and run["workers"] == nw and run["engine"].endswith("(M6)")
         (f,) = out.glob("*.cu8")
         files[nw] = f.read_bytes()
     assert len(files[1]) == 2 * 9 * FS

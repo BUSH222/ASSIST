@@ -227,7 +227,8 @@ def test_resolve_fills_everything(tmp_path: Path) -> None:
     assert isinstance(em.schedule, OnOffSchedule)
     assert em.schedule.phase_s is not None and em.am is not None and em.am.phase_rad is not None
     assert em.level.p_tx_dbw is not None and "cn0_zenith_dbhz 45" in str(em.level.resolved_from)
-    assert round(em.freq_hz * 1000) == em.freq_hz * 1000  # quantised to 1 mHz
+    f = em.freqs_hz[0]
+    assert round(f * 1000) == f * 1000  # quantised to 1 mHz
     assert sc.assist_version and sc.band_hash and sc.profile_hash is None
     # --set and seeds change draws; the scenario hash follows
     other = resolve(BASIC, sets=["seed=43"])

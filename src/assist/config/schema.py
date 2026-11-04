@@ -18,7 +18,7 @@ from pydantic import (
 )
 
 from assist.emitters.link import QFH_COEFFS_DB
-from assist.signals.base import get_kind
+from assist.signals.base import check_params, get_kind
 from assist.station import DEFAULT_TZ, FALLBACK_ALT_M, FALLBACK_LAT_DEG, FALLBACK_LON_DEG
 from assist.timebase import format_iso, parse_duration, parse_iso
 
@@ -222,13 +222,21 @@ Orbit = Annotated[
 
 class SignalConfig(_M):
     kind: str
-    params: dict[str, Any] = Field(default_factory=dict, description="Checked once the signal kind is implemented.")
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters of the kind (plan §5); checked, and defaults filled in, once the kind is implemented.",
+    )
 
     @field_validator("kind")
     @classmethod
     def _kind(cls, v: str) -> str:
         get_kind(v)
         return v
+
+    @model_validator(mode="after")
+    def _params(self) -> SignalConfig:
+        self.params = check_params(self.kind, self.params)
+        return self
 
 
 class Oscillator(_M):
@@ -310,13 +318,43 @@ class Emitter(_M):
     id: str = Field(min_length=1)
     enabled: bool = True
     signal: SignalConfig
-    freq_hz: float = Field(gt=0, description="Nominal frequency (quantised to 1 mHz at resolve).")
+    freq_hz: float | list[float] | None = Field(
+        None,
+        description="Nominal frequency (Hz, quantised to 1 mHz at resolve). Event signals may give a list: each "
+        "event is on one of them (a keyed draw per event). Or give `channel`.",
+    )
+    channel: int | str | None = Field(
+        None,
+        description="Instead of freq_hz: an index into the source's `channels`, or a channel name from the band "
+        "(e.g. orbcomm_gateway). Resolve replaces it by freq_hz.",
+    )
     offset_hz: float = Field(0.0, description="Fixed offset (rest-frequency error).")
     oscillator: Oscillator | None = Field(None, description="Per-pass offset and drift (zombies).")
     schedule: ScheduleConfig = Field(default_factory=ContinuousSchedule)
     am: AmConfig | None = None
     level: Level
     pattern: PatternSpec = Field(default_factory=lambda: PolyPattern(type="poly", coeffs_db=list(QFH_COEFFS_DB)))
+
+    @model_validator(mode="after")
+    def _frequency(self) -> Emitter:
+        if (self.freq_hz is None) == (self.channel is None):
+            raise ValueError(f"emitter {self.id}: give exactly one of freq_hz and channel")
+        f = self.freq_hz
+        if isinstance(f, list):
+            if not f:
+                raise ValueError(f"emitter {self.id}: freq_hz list is empty")
+            if get_kind(self.signal.kind).mode != "event":
+                raise ValueError(f"emitter {self.id}: a list of frequencies needs an event signal (one per event)")
+        if f is not None and min(f if isinstance(f, list) else [f]) <= 0:
+            raise ValueError(f"emitter {self.id}: frequencies must be > 0")
+        return self
+
+    @property
+    def freqs_hz(self) -> list[float]:
+        """The emitter's frequencies (one, or the per-event choices). Needs a resolved emitter (no `channel`)."""
+        if self.freq_hz is None:
+            raise ValueError(f"emitter {self.id}: frequency not resolved (channel {self.channel!r})")
+        return list(self.freq_hz) if isinstance(self.freq_hz, list) else [self.freq_hz]
 
 
 class Source(_M):
@@ -327,6 +365,11 @@ class Source(_M):
     orbit: Orbit
     in_catalog: bool | None = Field(None, description="Default: true for catalog orbits, false for synthetic ones.")
     catalog_norad: int | None = Field(None, description="NORAD id of a synthetic object in the catalog output.")
+    channels: list[float | str] | None = Field(
+        None,
+        description="Channel frequencies of this source (Hz, or channel names from the band such as S-5), drawn once "
+        "per source in presets (orbcomm: sample([S-1, ..., S-12], 2)). An emitter's `channel: i` uses item i.",
+    )
     emitters: list[Emitter] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -334,6 +377,10 @@ class Source(_M):
         ids = [e.id for e in self.emitters]
         if len(ids) != len(set(ids)):
             raise ValueError(f"source {self.id}: duplicate emitter ids {ids}")
+        n = len(self.channels or [])
+        for e in self.emitters:
+            if isinstance(e.channel, int) and not 0 <= e.channel < n:
+                raise ValueError(f"source {self.id}: emitter {e.id} uses channel {e.channel}, but channels has {n}")
         return self
 
 

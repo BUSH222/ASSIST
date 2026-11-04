@@ -12,17 +12,22 @@ absolute time, never on where a render starts (window independence, T-WIN):
   The range term gives Doppler as exact phase, with no integration drift.
 
 Both are linearly interpolated to the narrow rate. The schedule envelope (with its 5 ms ramps), the AM gain and
-the horizon mask are evaluated directly at the narrow rate.
+the horizon mask are evaluated directly at the narrow rate; the `nco` kernel applies level and phase to the
+signal's samples (M6).
 
 **Narrow stream** (M5): per chunk c, one vectorised pass gives the narrow samples of all its OLA blocks 100c ..
 100c + 99, i.e. narrow indices [100c L/2, (100c + 101) L/2) (L/2 = rate / 100, so the stream starts at Unix
 second c), plus a flag per block saying whether the emitter is active in it. Every value depends only on the chunk
 and the absolute index, so the same samples come out whichever window is rendered.
 
-**Narrow rate** (plan §4.2): r >= 1.25 (B + 2 max|f_rx - f_bin|), a multiple of 100 Hz with an FFT-friendly block
-length. The excursion bound covers the bin rounding, Doppler at the orbit's perigee speed (plus Earth rotation),
-6 sigma of the per-pass offset and the drift over 30 min. Each chunk checks the actual excursion and fails loudly
-if it is exceeded.
+**Event signals** (LoRa, M6): the signal renders the events overlapping the chunk (each whole, from its start);
+the schedule envelope is not applied (bursts start and end in the signal). An emitter with several frequencies
+gets one EmitterRender per frequency, each rendering only the events on its own.
+
+**Narrow rate** (plan §4.2): r >= 1.25 (B + 2 max|f_rx - f_bin|), a multiple of 100 Hz and of the signal's rate
+step (the symbol rate, so samples per symbol are whole), with an FFT-friendly block length. The excursion bound
+covers the bin rounding, Doppler at the orbit's perigee speed (plus Earth rotation), 6 sigma of the per-pass
+offset and the drift over 30 min. Each chunk checks the actual excursion and fails loudly if it is exceeded.
 """
 
 import math
@@ -35,9 +40,13 @@ import scipy.fft as sfft
 
 from assist.emitters.link import C_M_S
 from assist.orbits.geometry import BLOCK_S
+from assist.signals.base import lcm
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from assist.emitters.emitter import Emitter
+    from assist.emitters.schedules import Event
     from assist.orbits.geometry import Pass
     from assist.signals.base import Signal
 
@@ -65,16 +74,19 @@ def max_speed_km_s(sat: object) -> float:
     return math.sqrt(MU_KM3_S2 * (2 / rp - 1 / a)) + EARTH_ROTATION_KM_S
 
 
-def narrow_rate(bandwidth_hz: float, excursion_hz: float, preferred: int, fs: int, m: int) -> int:
-    """Smallest rate (multiple of 100 Hz, >= preferred) meeting the narrow-rate rule, with a fast FFT length."""
-    r = max(int(preferred), math.ceil(RATE_MARGIN * (bandwidth_hz + 2 * excursion_hz) / 100) * 100, 100)
+def narrow_rate(bandwidth_hz: float, excursion_hz: float, preferred: int, fs: int, m: int, step: int = 100) -> int:
+    """Smallest rate (a multiple of lcm(100, step) Hz, >= preferred) meeting the narrow-rate rule, with a fast FFT
+    length."""
+    q = lcm(100, int(step))
+    r = max(int(preferred), math.ceil(RATE_MARGIN * (bandwidth_hz + 2 * excursion_hz)), 100)
+    r = -(-r // q) * q
     while True:
         if r > fs:
             raise RenderError(f"narrow rate {r} Hz would exceed the sample rate {fs} Hz")
         n = r * m // fs
         if r * m % fs == 0 and n % 2 == 0 and sfft.next_fast_len(n) == n:
             return r
-        r += 100
+        r += q
 
 
 def _intersect(xs: list[tuple[float, float]], ys: list[tuple[float, float]]) -> list[tuple[float, float]]:
@@ -105,16 +117,29 @@ class Stream:
 
 
 class EmitterRender:
-    """One emitter as the synthesiser sees it: rate, bin, and its narrow block for any absolute block index."""
+    """One emitter (one of its frequencies) as the synthesiser sees it: rate, bin, and its narrow samples for any
+    absolute chunk."""
 
-    def __init__(self, em: Emitter, signal: Signal, fc_hz: float, fs: int, hop: int, m: int) -> None:
-        self.em, self.signal = em, signal
+    def __init__(
+        self,
+        em: Emitter,
+        signal: Signal,
+        fc_hz: float,
+        fs: int,
+        hop: int,
+        m: int,
+        dsp: ModuleType,
+        channel: int = 0,
+    ) -> None:
+        self.em, self.signal, self.dsp = em, signal, dsp
         self.fs, self.hop, self.m = fs, hop, m
+        self.channel = channel
+        self.multi = len(em.channels_mhz) > 1
         self.hop_ms = hop * 1000 // fs
         self.chunk_ms = HOPS_PER_CHUNK * self.hop_ms
         bin_mhz = fs * 1000 // m  # 50 Hz in mHz
         fc_mhz = round(fc_hz * 1000)
-        rest = em.carrier.rest_mhz
+        rest = self.rest_mhz = em.channels_mhz[channel]
         self.k_bin = (rest - fc_mhz + bin_mhz // 2) // bin_mhz
         self.f_bin_mhz = fc_mhz + self.k_bin * bin_mhz
         car = em.carrier
@@ -125,7 +150,7 @@ class EmitterRender:
             + (car.drift_hz_s or 0.0) * DRIFT_BOUND_S
         )
         self.bandwidth_hz = signal.bandwidth_hz()
-        self.rate = narrow_rate(self.bandwidth_hz, excursion, signal.preferred_rate(), fs, m)
+        self.rate = narrow_rate(self.bandwidth_hz, excursion, signal.preferred_rate(), fs, m, signal.rate_step())
         self.n = self.rate * m // fs  # narrow samples per block
         self.limit_hz = (self.rate / RATE_MARGIN - self.bandwidth_hz) / 2
         self._ctl: OrderedDict[int, Control] = OrderedDict()
@@ -134,7 +159,12 @@ class EmitterRender:
 
     @property
     def id(self) -> str:
-        return f"{self.em.source_id}/{self.em.id}"
+        base = f"{self.em.source_id}/{self.em.id}"
+        return f"{base}@{self.rest_mhz / 1e9:.6f}MHz" if self.multi else base
+
+    def events(self, t0: float, t1: float) -> list[Event]:
+        """Event signals: this frequency's events overlapping [t0, t1)."""
+        return [e for e in self.em.schedule.events(t0, t1) if self.em.event_channel(e) == self.channel]
 
     def _hour_passes(self, hr: int) -> list[Pass]:
         """Complete passes overlapping UTC hour hr (geometry for that hour, and the next if a pass runs on)."""
@@ -179,7 +209,7 @@ class EmitterRender:
         t_lo, t_hi = float(t[0]), float(t[-1])
         passes = self._passes(t_lo - 1.0, t_hi + 1.0)
         key = np.full(k.shape, -1, dtype=np.int64)
-        base = np.full(k.shape, car.rest_mhz, dtype=np.int64)
+        base = np.full(k.shape, self.rest_mhz, dtype=np.int64)
         drift = np.zeros(k.shape)
         for p in passes:
             if p.aos_key is None:
@@ -187,10 +217,10 @@ class EmitterRender:
             sel = (t >= p.aos - PASS_PAD_S) & (t < p.los + PASS_PAD_S)
             off, d = car.pass_terms(p.aos_key)
             key[sel] = p.aos_key
-            base[sel] = car.rest_mhz + off
+            base[sel] = self.rest_mhz + off
             drift[sel] = d
         g = em.platform.geo.geometry_ms(k)
-        amp = 10 ** (em.link_dbm(g.el_deg, g.az_deg, g.range_m, g.off_nadir_deg) / 20)
+        amp = 10 ** (em.link_dbm(g.el_deg, g.az_deg, g.range_m, g.off_nadir_deg, self.rest_mhz) / 20)
         # Constant-frequency part: (f - f_bin)[mHz] * t[ms] / 1e6 cycles, reduced mod 1 cycle with integers.
         delta = base - self.f_bin_mhz
         i = k - k0
@@ -204,7 +234,11 @@ class EmitterRender:
         cyc += 0.5 * drift * dt_aos**2 - f_tx * g.range_m / C_M_S
         cyc -= math.floor(cyc[0])
         visible = [(p.aos, p.los) for p in passes]
-        active = _intersect(visible, em.schedule.active_intervals(t_lo, t_hi + 1e-3))
+        if self.signal.mode == "event":
+            on = [(e.start, e.end) for e in self.events(t_lo, t_hi + 1e-3)]
+        else:
+            on = em.schedule.active_intervals(t_lo, t_hi + 1e-3)
+        active = _intersect(visible, on)
         self._check_excursion(t, cyc, active)
         return Control(int(k0), amp, cyc, visible, active)
 
@@ -256,9 +290,13 @@ class EmitterRender:
         vis = np.zeros(t.shape, dtype=bool)
         for a, z in ctl.visible:
             vis |= (t >= a) & (t < z)
-        env = self.em.schedule.envelope(t) * vis
+        if self.signal.mode == "event":
+            env = vis.astype(np.float64)
+            x = self.signal.render_events(self.events(float(t[0]), float(t[-1]) + 1e-3), n0, k, self.rate)
+        else:
+            env = self.em.schedule.envelope(t) * vis
+            x = None if self.signal.constant else self.signal.render(n0, k, self.rate)
         if self.em.am is not None:
             env = env * 10 ** (self.em.am.gain_db(t) / 20)
-        x = self.signal.render(n0, k, self.rate)
-        v = x * (amp * env) * np.exp(2j * np.pi * cyc)
-        return Stream(v.astype(np.complex64), active.astype(np.uint8))
+        v = self.dsp.nco(x, amp * env, cyc)
+        return Stream(v, active.astype(np.uint8))

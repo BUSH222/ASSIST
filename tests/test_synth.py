@@ -6,8 +6,10 @@ signal computed directly at fs. Block indices are absolute (around 1.8e11 in 202
 exercised.
 
 - CW at several bins (odd and even) and offsets from the bin;
-- QPSK at 72 ksym/s with an RRC pulse (alpha 0.6) at 4 samples per symbol, a stand-in for the M6 `oqpsk` signal:
-  the narrow samples and the wideband reference come from the same continuous-time waveform.
+- QPSK at 72 ksym/s with an RRC pulse (alpha 0.6) at 4 samples per symbol, the M3 stand-in: the narrow samples and
+  the wideband reference come from the same continuous-time waveform;
+- the M6 `oqpsk` signal (METEOR LRPT) itself: the reference is its narrow samples interpolated to fs (band-limited,
+  by FFT over a long stretch around the hops checked).
 
 Checks: error and spurious lines <= -60 dBc, CW amplitude flat within 0.01 dB, no phase jump at hop edges.
 """
@@ -17,6 +19,8 @@ import pytest
 
 from assist import _dsp, dsp_ref
 from assist.engine.synth import hann
+from assist.rng import KeyedRng
+from assist.signals.base import Keys, make_signal
 
 FS = 2_400_000
 HOP = FS // 100
@@ -144,6 +148,35 @@ def test_ola_qpsk(dsp) -> None:
     n_abs = h0 * HOP + np.arange(hops * HOP, dtype=np.int64)
     ref = q.at((n_abs - (h0 - 2) * HOP) / FS) * _tone(n_abs, k_bin * 50 + delta, FS)
     assert t_ref > 0
+    err = y.astype(np.complex128) - ref
+    assert _dbc(err, ref) <= -60
+    assert _max_line_dbc(err, ref) <= -60
+
+
+@BACKENDS
+def test_ola_oqpsk(dsp) -> None:
+    """METEOR LRPT (`oqpsk`, 288 kS/s narrow rate), 3 kHz from an odd bin: error <= -60 dBc against its narrow
+    samples interpolated to fs."""
+    sig = make_signal("oqpsk", {}, Keys(KeyedRng(1), "m2-3", "lrpt"), _dsp)
+    rate, hops, margin = 288_000, 12, 30
+    half = rate * M // FS // 2  # narrow samples per hop
+    h0 = B0 + 7
+    k_bin, delta = 7001, 3000
+
+    def narrow(n0: int, n: int) -> np.ndarray:
+        return sig.render(n0, n, rate) * _tone(n0 + np.arange(n, dtype=np.int64), delta, rate)
+
+    y = _synth(dsp, narrow, rate, k_bin, h0, hops)
+    lo = h0 - margin  # reference: hops lo .. lo + 2 margin + hops, interpolated by FFT (25/3), the middle kept
+    nh = 2 * margin + hops
+    x = narrow(lo * half, nh * half).astype(np.complex128)
+    spec = np.fft.fft(x)
+    up = np.zeros(nh * HOP, dtype=np.complex128)
+    k = len(x) // 2
+    up[:k], up[-k:] = spec[:k], spec[-k:]
+    wide = np.fft.ifft(up) * (len(up) / len(x))
+    n_abs = h0 * HOP + np.arange(hops * HOP, dtype=np.int64)
+    ref = wide[margin * HOP : (margin + hops) * HOP] * _tone(n_abs, k_bin * 50, FS)
     err = y.astype(np.complex128) - ref
     assert _dbc(err, ref) <= -60
     assert _max_line_dbc(err, ref) <= -60

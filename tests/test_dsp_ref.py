@@ -257,3 +257,168 @@ def test_kernels_reject_bad_arguments(impl) -> None:
         impl.noise(1, 5, 1, 2000, 2000, tf, 512)
     with pytest.raises(ValueError, match="hop"):
         impl.white(1, 5, 1, 3)
+
+
+# --- modem and conv kernels (M6) ---
+
+KEY = 0x9E3779B97F4A7C15
+
+
+@pytest.mark.parametrize("block", [0, 7, 2**33 + 5, 2**64 - 1])
+@pytest.mark.parametrize("n", [0, 1, 16, 1020])
+def test_random_bytes_is_bit_identical(block: int, n: int) -> None:
+    got, want = _dsp.random_bytes(KEY, block, n), dsp_ref.random_bytes(KEY, block, n)
+    assert got.dtype == want.dtype == np.uint8 and got.shape == want.shape == (n,)
+    np.testing.assert_array_equal(got, want)
+
+
+def test_random_bytes_are_keyed_by_block_and_prefix_stable() -> None:
+    a = _dsp.random_bytes(KEY, 41, 4096)
+    np.testing.assert_array_equal(_dsp.random_bytes(KEY, 41, 100), a[:100])  # any length is a prefix
+    assert not np.array_equal(_dsp.random_bytes(KEY, 42, 4096), a)
+    assert not np.array_equal(_dsp.random_bytes(KEY + 1, 41, 4096), a)
+    counts = np.bincount(a, minlength=256)
+    assert counts.min() > 0 and abs(float(np.mean(a)) - 127.5) < 5
+
+
+def test_ccsds_randomiser_sequence() -> None:
+    """CCSDS 131.0-B: the pseudo-random sequence starts FF 48 0E C0 9A 0D 70 BC and repeats every 255 bits."""
+    for impl in (_dsp, dsp_ref):
+        pn = impl.ccsds_randomise(np.zeros(1020, dtype=np.uint8))
+        assert pn[:8].tobytes().hex() == "ff480ec09a0d70bc"
+        bits = np.unpackbits(pn)
+        np.testing.assert_array_equal(bits[255 : 255 + 2000], bits[:2000])
+    d = np.random.default_rng(4).integers(0, 256, 1020).astype(np.uint8)
+    np.testing.assert_array_equal(_dsp.ccsds_randomise(d), dsp_ref.ccsds_randomise(d))
+    np.testing.assert_array_equal(_dsp.ccsds_randomise(_dsp.ccsds_randomise(d)), d)  # an involution
+
+
+def test_conv_encoder_impulse_response_and_state() -> None:
+    """A single 1 gives the generators 171 and 133 (octal) interleaved; encoding in two pieces with the 6-bit
+    state carried over equals encoding in one piece."""
+    for impl in (_dsp, dsp_ref):
+        out = impl.conv_encode(np.array([1, 0, 0, 0, 0, 0, 0, 0], dtype=np.uint8), 0)
+        g1, g2 = out[0::2][:7], out[1::2][:7]
+        assert int("".join(map(str, g1)), 2) == 0o171 and int("".join(map(str, g2)), 2) == 0o133
+    bits = np.random.default_rng(5).integers(0, 2, 5000).astype(np.uint8)
+    for st in (0, 1, 42, 63):
+        np.testing.assert_array_equal(_dsp.conv_encode(bits, st), dsp_ref.conv_encode(bits, st))
+    whole = _dsp.conv_encode(bits, 0)
+    cut = 1234
+    state = int("".join(map(str, bits[cut - 6 : cut])), 2)  # the last 6 bits, newest in bit 0
+    np.testing.assert_array_equal(
+        np.concatenate([_dsp.conv_encode(bits[:cut], 0), _dsp.conv_encode(bits[cut:], state)]), whole
+    )
+
+
+def _shape_case(seed: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    g = np.random.default_rng(seed)
+    si = g.choice([-0.7, 0.7], 400).astype(np.float32)
+    sq = g.choice([-0.7, 0.7], 400).astype(np.float32)
+    return si, sq, g.standard_normal(41).astype(np.float32)
+
+
+@pytest.mark.parametrize(("sps", "qd"), [(4, 2), (4, 0), (8, 0), (5, 2)])
+def test_shape_matches_reference_and_definition(sps: int, qd: int) -> None:
+    si, sq, h = _shape_case(sps + qd)
+    k0, n0, n = 10**12 + 3, (10**12 + 3) * sps - 30, 400 * sps + 60  # covers both ends of the symbol run
+    got = _dsp.shape(si, sq, k0, h, sps, qd, n0, n)
+    want = dsp_ref.shape(si, sq, k0, h, sps, qd, n0, n)
+    assert _peak_err(got, want) <= RTOL
+    c = (len(h) - 1) // 2
+    for j in (0, 25, 31, 777, n - 1):  # the definition, sample by sample
+        m = n0 + j
+        re = sum(
+            float(si[k - k0]) * float(h[m - k * sps + c]) for k in range(k0, k0 + 400) if 0 <= m - k * sps + c < 41
+        )
+        mq = m - qd
+        im = sum(
+            float(sq[k - k0]) * float(h[mq - k * sps + c]) for k in range(k0, k0 + 400) if 0 <= mq - k * sps + c < 41
+        )
+        assert abs(got[j] - complex(re, im)) <= 1e-5 * max(1.0, abs(complex(re, im)))
+
+
+def test_shape_window_is_a_slice() -> None:
+    si, sq, h = _shape_case(9)
+    k0 = 5 * 10**11
+    full = _dsp.shape(si, sq, k0, h, 4, 2, 4 * k0, 1600)
+    np.testing.assert_array_equal(_dsp.shape(si, sq, k0, h, 4, 2, 4 * k0 + 333, 500), full[333:833])
+
+
+def _chirp_case(sf: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    t = 2**sf / 125e3
+    starts = np.array([0, 1, 2, 3, 3.25, 4.25]) * t
+    lens = np.array([1, 1, 1, 0.25, 1, 1]) * t
+    vals = np.array([0, 8, -1, -1, 2**sf - 1, 37], dtype=np.int32)
+    return starts, lens, vals, t
+
+
+@pytest.mark.parametrize("sf", [7, 9, 12])
+def test_chirp_matches_reference(sf: int) -> None:
+    st, ln, v, t = _chirp_case(sf)
+    rate = 250_000.0
+    n = int(6 * t * rate) + 50
+    got = _dsp.chirp(st, ln, v, sf, 125e3, -1e-4, 1 / rate, n)
+    want = dsp_ref.chirp(st, ln, v, sf, 125e3, -1e-4, 1 / rate, n)
+    np.testing.assert_allclose(got, want, rtol=0, atol=1e-5)
+    on = np.abs(got) > 0
+    assert np.allclose(np.abs(got[on]), 1, atol=1e-6)
+    lead = round(1e-4 * rate)
+    assert not on[:lead].any() and on[lead + 1 : lead + int(5.25 * t * rate) - 1].all()  # (sample lead: t ~ 0)
+
+
+def test_chirp_slope_wrap_and_phase_continuity() -> None:
+    """Up-chirps rise at bw / T from -bw/2 + v bw / 2^sf and wrap at +bw/2; down-chirps fall; no phase steps."""
+    sf, bw, rate = 8, 125e3, 1e6
+    st, ln, v, t = _chirp_case(sf)
+    x = _dsp.chirp(st, ln, v, sf, bw, 0.0, 1 / rate, int(6.25 * t * rate)).astype(np.complex128)
+    f = np.angle(x[1:] * np.conj(x[:-1])) * rate / (2 * np.pi)  # Hz, between samples j and j + 1
+    tm = (np.arange(len(f)) + 0.5) / rate
+    slope = bw / t
+    for s, (a, d) in enumerate(zip(st, ln, strict=True)):
+        sel = (tm > a + 2 / rate) & (tm < a + d - 2 / rate)
+        u = tm[sel] - a
+        up = (v[s] * bw / 2**sf + slope * u) % bw - bw / 2  # rises from -bw/2 + v bw / 2^sf, wraps at +bw/2
+        expect = up if v[s] >= 0 else bw / 2 - slope * u
+        err = np.abs((f[sel] - expect + bw / 2) % bw - bw / 2)
+        assert np.percentile(err, 99) < 200, (s, float(np.max(err)))
+    assert np.max(np.abs(f)) <= bw / 2 + 1e3  # phase continuous at segment edges and wraps
+
+
+def test_nco_matches_reference() -> None:
+    g = np.random.default_rng(6)
+    n = 50_001
+    gain = g.uniform(0, 3, n)
+    cyc = np.cumsum(g.uniform(-0.4, 0.4, n)) + 1e5  # large phase, reduced to [0, 1) cycles inside
+    x = _random_iq(n, seed=7)
+    for xx in (x, None):
+        got, want = _dsp.nco(xx, gain, cyc), dsp_ref.nco(xx, gain, cyc)
+        np.testing.assert_allclose(got, want, rtol=0, atol=1e-5 * float(np.max(np.abs(want))))
+    ref = x.astype(np.complex128) * gain * np.exp(2j * np.pi * cyc)
+    np.testing.assert_allclose(_dsp.nco(x, gain, cyc), ref, rtol=0, atol=1e-5 * float(np.max(np.abs(ref))))
+    out = np.empty(n, dtype=np.complex64)
+    assert np.shares_memory(_dsp.nco(None, gain, cyc, out), out)
+
+
+@pytest.mark.parametrize("impl", [_dsp, dsp_ref], ids=["c++", "numpy"])
+def test_modem_kernels_reject_bad_arguments(impl) -> None:
+    f = np.zeros(10, dtype=np.float32)
+    with pytest.raises(ValueError, match="n must be"):
+        impl.random_bytes(1, 2, -1)
+    with pytest.raises(ValueError, match="6 bits"):
+        impl.conv_encode(np.zeros(4, dtype=np.uint8), 64)
+    with pytest.raises(ValueError, match="same length"):
+        impl.shape(f, f[:5], 0, np.ones(5, dtype=np.float32), 4, 2, 0, 10)
+    with pytest.raises(ValueError, match="odd"):
+        impl.shape(f, f, 0, np.ones(4, dtype=np.float32), 4, 2, 0, 10)
+    with pytest.raises(ValueError, match="qd"):
+        impl.shape(f, f, 0, np.ones(5, dtype=np.float32), 4, 4, 0, 10)
+    st, ln, v, _ = _chirp_case(7)
+    with pytest.raises(ValueError, match="sf"):
+        impl.chirp(st, ln, v, 13, 125e3, 0.0, 1e-6, 10)
+    with pytest.raises(ValueError, match="increase"):
+        impl.chirp(st[::-1].copy(), ln, v, 7, 125e3, 0.0, 1e-6, 10)
+    with pytest.raises(ValueError, match="2\\^sf"):
+        impl.chirp(st, ln, v * 0 + 128, 7, 125e3, 0.0, 1e-6, 10)
+    with pytest.raises(ValueError, match="same length"):
+        impl.nco(None, np.ones(3), np.ones(4))

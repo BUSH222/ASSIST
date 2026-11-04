@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "basic.hpp"
+#include "conv.hpp"
 #include "frontend.hpp"
+#include "modem.hpp"
 #include "synth.hpp"
 
 namespace py = pybind11;
@@ -21,6 +23,8 @@ using assist::cf32;
 using CArray = py::array_t<cf32, py::array::c_style | py::array::forcecast>;
 using FArray = py::array_t<float, py::array::c_style | py::array::forcecast>;
 using U8Array = py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>;
+using DArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
+using I32Array = py::array_t<std::int32_t, py::array::c_style | py::array::forcecast>;
 // Outputs written in place (`out=`) are taken as plain py::array and checked, never converted.
 
 namespace {
@@ -150,6 +154,117 @@ py::array adc(const CArray& x, double gain, const std::optional<CArray>& add, co
     return res;
 }
 
+U8Array random_bytes(std::uint64_t key, std::uint64_t block, std::int64_t n) {
+    require(n >= 0, "n must be >= 0");
+    U8Array out(n);
+    std::uint8_t* o = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        assist::random_bytes(key, block, static_cast<std::ptrdiff_t>(n), o);
+    }
+    return out;
+}
+
+U8Array conv_encode(const U8Array& bits, unsigned state) {
+    require_1d(bits, "bits");
+    require(state < 64u, "state must hold 6 bits (0 .. 63)");
+    const py::ssize_t n = bits.shape(0);
+    U8Array out(2 * n);
+    const std::uint8_t* b = bits.data();
+    std::uint8_t* o = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        assist::conv_encode(b, n, state, o);
+    }
+    return out;
+}
+
+U8Array ccsds_randomise(const U8Array& data) {
+    require_1d(data, "data");
+    const py::ssize_t n = data.shape(0);
+    U8Array out(n);
+    const std::uint8_t* d = data.data();
+    std::uint8_t* o = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        assist::ccsds_randomise(d, n, o);
+    }
+    return out;
+}
+
+CArray shape(const FArray& si, const FArray& sq, std::int64_t k0, const FArray& h, std::int64_t sps, std::int64_t qd,
+             std::int64_t n0, std::int64_t n) {
+    require_1d(si, "si");
+    require_1d(sq, "sq");
+    require_1d(h, "h");
+    require(si.shape(0) == sq.shape(0), "si and sq must have the same length");
+    require(h.shape(0) >= 1 && h.shape(0) % 2 == 1, "h must hold an odd number of taps");
+    require(sps >= 1, "sps must be >= 1");
+    require(qd >= 0 && qd < sps, "qd must be in [0, sps)");
+    require(n >= 0, "n must be >= 0");
+    CArray out(n);
+    const float* a = si.data();
+    const float* b = sq.data();
+    const float* t = h.data();
+    cf32* o = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        assist::shape(a, b, si.shape(0), k0, t, h.shape(0), sps, qd, n0, static_cast<std::ptrdiff_t>(n), o);
+    }
+    return out;
+}
+
+CArray chirp(const DArray& start, const DArray& length, const I32Array& val, int sf, double bw, double t0, double dt,
+             std::int64_t n) {
+    require_1d(start, "start");
+    require_1d(length, "length");
+    require_1d(val, "val");
+    require(start.shape(0) == length.shape(0) && start.shape(0) == val.shape(0), "start, length and val must match");
+    require(start.shape(0) >= 1, "at least one segment is needed");
+    require(sf >= 5 && sf <= 12, "sf must be in 5 .. 12");
+    require(bw > 0 && dt > 0, "bw and dt must be > 0");
+    require(n >= 0, "n must be >= 0");
+    const std::int64_t ns = start.shape(0);
+    const double* st = start.data();
+    const double* ln = length.data();
+    const std::int32_t* v = val.data();
+    for (std::int64_t s = 0; s < ns; ++s) {
+        require(ln[s] > 0, "segment lengths must be > 0");
+        require(s == 0 || st[s] > st[s - 1], "segment starts must increase");
+        require(v[s] < (1 << sf), "chirp values must be < 2^sf");
+    }
+    CArray out(n);
+    cf32* o = out.mutable_data();
+    {
+        py::gil_scoped_release release;
+        assist::chirp(st, ln, v, static_cast<std::ptrdiff_t>(ns), sf, bw, t0, dt, static_cast<std::ptrdiff_t>(n), o);
+    }
+    return out;
+}
+
+py::array nco(const std::optional<CArray>& x, const DArray& gain, const DArray& cyc,
+              const std::optional<py::array>& out) {
+    require_1d(gain, "gain");
+    require_1d(cyc, "cyc");
+    const py::ssize_t n = gain.shape(0);
+    require(cyc.shape(0) == n, "gain and cyc must have the same length");
+    const cf32* xp = nullptr;
+    if (x.has_value()) {
+        require_1d(*x, "x");
+        require(x->shape(0) == n, "x must have the same length as gain");
+        xp = x->data();
+    }
+    py::array res = output<cf32>(out, n);
+    cf32* o = static_cast<cf32*>(res.mutable_data());
+    const double* g = gain.data();
+    const double* c = cyc.data();
+    {
+        py::gil_scoped_release release;
+        assist::nco(xp, g, c, n, o);
+    }
+    return res;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_dsp, m) {
@@ -170,4 +285,15 @@ PYBIND11_MODULE(_dsp, m) {
           py::arg("n_hist"), py::arg("out") = py::none(), "Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save (plan §4.3).");
     m.def("adc", &adc, py::arg("x"), py::arg("gain"), py::arg("add") = py::none(), py::arg("out") = py::none(),
           "Interleaved uint8 I, Q: clip(rint(127.5 + gain * (x + add)), 0, 255).");
+    m.def("random_bytes", &random_bytes, py::arg("key"), py::arg("block"), py::arg("n"),
+          "n random bytes of block `block` (Philox4x32-10, counter (i, 0, block)).");
+    m.def("conv_encode", &conv_encode, py::arg("bits"), py::arg("state") = 0,
+          "K = 7, r = 1/2 convolutional code (171, 133 octal) of 0/1 bits; state = previous 6 input bits.");
+    m.def("ccsds_randomise", &ccsds_randomise, py::arg("data"), "XOR with the CCSDS randomiser sequence (FF 48 0E ...).");
+    m.def("shape", &shape, py::arg("si"), py::arg("sq"), py::arg("k0"), py::arg("h"), py::arg("sps"), py::arg("qd"),
+          py::arg("n0"), py::arg("n"), "Pulse shaping of symbols k0 .. into samples n0 .. n0 + n - 1.");
+    m.def("chirp", &chirp, py::arg("start"), py::arg("length"), py::arg("val"), py::arg("sf"), py::arg("bw"),
+          py::arg("t0"), py::arg("dt"), py::arg("n"), "A LoRa burst from chirp segments, sampled at t0 + j dt.");
+    m.def("nco", &nco, py::arg("x"), py::arg("gain"), py::arg("cyc"), py::arg("out") = py::none(),
+          "x * gain * exp(2 pi i cyc) as complex64 (x None: a constant 1).");
 }

@@ -6,7 +6,8 @@ Random expressions are drawn afterwards (`randexpr`) and the result is validated
 - `include:` paths are relative to the including file, then to the package (`bands/vhf137/...`).
 - Merging: dicts merge recursively; lists of dicts with `id`s merge by id; other lists are replaced. A dict whose
   discriminator (`type`, `dist`, `kind`) changes is replaced, not merged, and giving one of a set of alternatives
-  drops the others (a level's p_tx_dbw / cn0_zenith_dbhz / cal; an orbit's norad / kepler / synthetic_pass).
+  drops the others (a level's p_tx_dbw / cn0_zenith_dbhz / cal; an orbit's norad / kepler / synthetic_pass; an
+  emitter's freq_hz / channel).
 - `--set path=value` addresses list items by id: `sources[z1].freq_hz=137.35e6`. It runs before presets are
   expanded, so it can override any preset default through the source.
 - Presets: a source's keys override the preset. Source keys that name an emitter (`gateway: {...}`) go to that
@@ -23,13 +24,14 @@ import yaml
 
 PACKAGE_DIR = Path(__file__).resolve().parent.parent
 DISCRIMINATORS = ("type", "dist", "kind")
-EXCLUSIVE = ({"p_tx_dbw", "cn0_zenith_dbhz", "cal"}, {"norad", "kepler", "synthetic_pass"})
-SOURCE_KEYS = {"id", "preset", "platform", "name", "orbit", "in_catalog", "catalog_norad", "emitters"}
+EXCLUSIVE = ({"p_tx_dbw", "cn0_zenith_dbhz", "cal"}, {"norad", "kepler", "synthetic_pass"}, {"freq_hz", "channel"})
+SOURCE_KEYS = {"id", "preset", "platform", "name", "orbit", "in_catalog", "catalog_norad", "channels", "emitters"}
 EMITTER_KEYS = {
     "id",
     "enabled",
     "signal",
     "freq_hz",
+    "channel",
     "offset_hz",
     "oscillator",
     "schedule",
@@ -229,7 +231,7 @@ def expand_source(src: dict[str, Any]) -> dict[str, Any]:
         elif k in ids:
             emitters = [deep_merge(e, v) if e["id"] == k else e for e in emitters]
         elif k in EMITTER_KEYS:
-            emitters = [deep_merge(e, {k: v}) if k in e else {**e, k: copy.deepcopy(v)} for e in emitters]
+            emitters = [deep_merge(e, {k: v}) for e in emitters]
         else:
             raise ConfigError(f"source {sid}: unknown key {k!r}")
     out["emitters"] = emitters
