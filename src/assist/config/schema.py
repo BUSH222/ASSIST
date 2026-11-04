@@ -270,12 +270,24 @@ class ExpGapsSchedule(_M):
     mean_gap_s: float = Field(180.0, gt=0)
     min_gap_s: float = Field(20.0, ge=0)
     duration: Duration = Field(default_factory=Duration)
+    ramp_ms: float = Field(
+        0.0, ge=0, description="Continuous signals: raised-cosine ramps centred on each event's edges (M7)."
+    )
 
 
 class PoissonSchedule(_M):
     type: Literal["poisson_events"]
     rate_per_hour: float | list[float] = Field(description="Constant, or 24 values by UTC hour.")
     duration: Duration = Field(default_factory=Duration)
+    min_gap_s: float = Field(
+        0.0,
+        ge=0,
+        description="One transmitter (M7): an event starting less than this after the previous kept event's end "
+        "(within the hour slot) is dropped, so events never overlap. 0: independent events (they may overlap).",
+    )
+    ramp_ms: float = Field(
+        0.0, ge=0, description="Continuous signals: raised-cosine ramps centred on each event's edges (M7)."
+    )
 
     @field_validator("rate_per_hour")
     @classmethod
@@ -296,22 +308,76 @@ class AmConfig(_M):
     phase_rad: float | None = Field(None, description="Default: keyed draw.")
 
 
+LEVEL_KEYS = ("p_tx_dbw", "cn0_zenith_dbhz", "cal", "cn0_dbhz", "rx_dbm")
+
+
 class Level(_M):
-    p_tx_dbw: float | None = Field(None, description="Power into the transmit antenna.")
-    cn0_zenith_dbhz: float | None = Field(None, description="C/N0 of an overhead pass; solved to p_tx_dbw.")
-    cal: str | None = Field(None, description="Calibrated level from the profile or band (e.g. meteor_m2_3).")
+    """Satellites: p_tx_dbw, cn0_zenith_dbhz or cal (resolved to p_tx_dbw). Ground and local transmitters (M7): a
+    fixed received level, cn0_dbhz or rx_dbm (resolved to rx_dbm)."""
+
+    p_tx_dbw: float | None = Field(None, description="Satellites: power into the transmit antenna.")
+    cn0_zenith_dbhz: float | None = Field(
+        None, description="Satellites: C/N0 of an overhead pass; solved to p_tx_dbw."
+    )
+    cal: str | None = Field(
+        None, description="Satellites: calibrated level from the profile or band (e.g. meteor_m2_3)."
+    )
+    cn0_dbhz: float | None = Field(
+        None,
+        description="Ground/local: received C/N0 (against k T_sys, so the SNR at the emitter's frequency); solved to "
+        "rx_dbm.",
+    )
+    rx_dbm: float | None = Field(None, description="Ground/local: received power at the antenna terminals.")
     extra_loss_db: float = 0.0
-    resolved_from: str | None = Field(None, description="Set by resolve: how p_tx_dbw was obtained.")
+    resolved_from: str | None = Field(None, description="Set by resolve: how p_tx_dbw or rx_dbm was obtained.")
 
     @model_validator(mode="after")
     def _one(self) -> Level:
-        given = [k for k in ("p_tx_dbw", "cn0_zenith_dbhz", "cal") if getattr(self, k) is not None]
+        given = [k for k in LEVEL_KEYS if getattr(self, k) is not None]
         if self.resolved_from is not None:
-            if given != ["p_tx_dbw"]:
-                raise ValueError("a resolved level holds only p_tx_dbw")
+            if given not in (["p_tx_dbw"], ["rx_dbm"]):
+                raise ValueError("a resolved level holds only p_tx_dbw or rx_dbm")
         elif len(given) != 1:
-            raise ValueError("give exactly one of p_tx_dbw, cn0_zenith_dbhz, cal")
+            raise ValueError(f"give exactly one of {', '.join(LEVEL_KEYS)}")
         return self
+
+
+class EventLevel(_M):
+    """Per-event level in dB relative to the emitter's level: normal(0, sigma_db) clipped to [min_db, max_db], or
+    uniform in [min_db, max_db]."""
+
+    dist: Literal["normal", "uniform"] = "normal"
+    sigma_db: float = Field(0.0, ge=0)
+    min_db: float = 0.0
+    max_db: float = 0.0
+
+    @model_validator(mode="after")
+    def _range(self) -> EventLevel:
+        if self.min_db > self.max_db:
+            raise ValueError("min_db must be <= max_db")
+        return self
+
+
+class PerEvent(_M):
+    """Draws per event (M7), from the schedule's keyed slot stream: a frequency offset and a level. Used for
+    transmitters without geometry, e.g. aircraft VDL bursts (each burst its own offset and power)."""
+
+    offset_hz: float | tuple[float, float] = Field(
+        0.0, description="Frequency offset per event (Hz): a number or an inclusive [lo, hi] range (uniform)."
+    )
+    level_db: EventLevel | None = Field(None, description="Level per event, relative to the emitter's level.")
+
+    @field_validator("offset_hz")
+    @classmethod
+    def _offset(cls, v: float | tuple[float, float]) -> float | tuple[float, float]:
+        if isinstance(v, tuple) and v[0] > v[1]:
+            raise ValueError("offset_hz range must be [lo, hi] with lo <= hi")
+        return v
+
+    @property
+    def max_offset_hz(self) -> float:
+        o = self.offset_hz
+        return max(abs(o[0]), abs(o[1])) if isinstance(o, tuple) else abs(o)
 
 
 class Emitter(_M):
@@ -332,22 +398,42 @@ class Emitter(_M):
     oscillator: Oscillator | None = Field(None, description="Per-pass offset and drift (zombies).")
     schedule: ScheduleConfig = Field(default_factory=ContinuousSchedule)
     am: AmConfig | None = None
-    level: Level
+    level: Level | None = Field(
+        None, description="Required, except for wideband signals (noise_comb), whose level is relative to the noise."
+    )
+    per_event: PerEvent | None = Field(None, description="Frequency offset and level drawn per event (M7).")
     pattern: PatternSpec = Field(default_factory=lambda: PolyPattern(type="poly", coeffs_db=list(QFH_COEFFS_DB)))
 
     @model_validator(mode="after")
     def _frequency(self) -> Emitter:
         if (self.freq_hz is None) == (self.channel is None):
             raise ValueError(f"emitter {self.id}: give exactly one of freq_hz and channel")
+        mode = get_kind(self.signal.kind).mode
         f = self.freq_hz
         if isinstance(f, list):
             if not f:
                 raise ValueError(f"emitter {self.id}: freq_hz list is empty")
-            if get_kind(self.signal.kind).mode != "event":
+            if mode != "event":
                 raise ValueError(f"emitter {self.id}: a list of frequencies needs an event signal (one per event)")
         if f is not None and min(f if isinstance(f, list) else [f]) <= 0:
             raise ValueError(f"emitter {self.id}: frequencies must be > 0")
+        if self.level is None and mode != "wideband":
+            raise ValueError(f"emitter {self.id}: level is required")
+        if mode == "wideband":
+            if self.level is not None or self.per_event is not None or self.am is not None:
+                raise ValueError(f"emitter {self.id}: a wideband signal takes no level, per_event or am")
+            if not isinstance(self.schedule, PoissonSchedule | ExpGapsSchedule):
+                raise ValueError(f"emitter {self.id}: a wideband signal needs an event schedule (episodes)")
+        if self.per_event is not None and not isinstance(self.schedule, PoissonSchedule | ExpGapsSchedule):
+            raise ValueError(f"emitter {self.id}: per_event needs an event schedule (poisson_events or exp_gaps)")
         return self
+
+    @property
+    def lvl(self) -> Level:
+        """The level (every non-wideband emitter has one)."""
+        if self.level is None:
+            raise ValueError(f"emitter {self.id}: no level")
+        return self.level
 
     @property
     def freqs_hz(self) -> list[float]:
@@ -360,9 +446,13 @@ class Emitter(_M):
 class Source(_M):
     id: str = Field(min_length=1)
     preset: str | None = Field(None, description="Preset the source was expanded from.")
-    platform: Literal["satellite"] = "satellite"
+    platform: Literal["satellite", "ground", "local"] = Field(
+        "satellite",
+        description="satellite (an orbit); ground (M7: a terrestrial transmitter without geometry, fixed received "
+        "level); local (M7: interference inside the receiver, e.g. birdies, USB noise).",
+    )
     name: str | None = None
-    orbit: Orbit
+    orbit: Orbit | None = Field(None, description="Satellites only (required there).")
     in_catalog: bool | None = Field(None, description="Default: true for catalog orbits, false for synthetic ones.")
     catalog_norad: int | None = Field(None, description="NORAD id of a synthetic object in the catalog output.")
     channels: list[float | str] | None = Field(
@@ -374,6 +464,18 @@ class Source(_M):
 
     @model_validator(mode="after")
     def _unique_emitters(self) -> Source:
+        if self.platform == "satellite":
+            if self.orbit is None:
+                raise ValueError(f"source {self.id}: a satellite needs an orbit")
+        else:
+            if self.orbit is not None or self.in_catalog or self.catalog_norad is not None:
+                raise ValueError(f"source {self.id}: a {self.platform} source has no orbit and is not in the catalog")
+            for e in self.emitters:
+                if e.oscillator is not None:
+                    raise ValueError(f"source {self.id}: emitter {e.id}: per-pass oscillators need a satellite")
+        for e in self.emitters:
+            if get_kind(e.signal.kind).mode == "wideband" and self.platform != "local":
+                raise ValueError(f"source {self.id}: emitter {e.id}: wideband signals belong to a local source")
         ids = [e.id for e in self.emitters]
         if len(ids) != len(set(ids)):
             raise ValueError(f"source {self.id}: duplicate emitter ids {ids}")

@@ -226,7 +226,7 @@ def test_resolve_fills_everything(tmp_path: Path) -> None:
     (em,) = z.emitters
     assert isinstance(em.schedule, OnOffSchedule)
     assert em.schedule.phase_s is not None and em.am is not None and em.am.phase_rad is not None
-    assert em.level.p_tx_dbw is not None and "cn0_zenith_dbhz 45" in str(em.level.resolved_from)
+    assert em.lvl.p_tx_dbw is not None and "cn0_zenith_dbhz 45" in str(em.lvl.resolved_from)
     f = em.freqs_hz[0]
     assert round(f * 1000) == f * 1000  # quantised to 1 mHz
     assert sc.assist_version and sc.band_hash and sc.profile_hash is None
@@ -267,10 +267,10 @@ def test_levels_cal_is_t_sys_invariant(tmp_path: Path) -> None:
     """A calibrated level keeps C/N0 whatever T_ant is: P_tx moves with 10 log10(T_sys)."""
     d = _doc()
     d["sources"][0]["level"] = {"cal": "meteor_m2_3"}
-    p500 = _resolve_doc(d, tmp_path).scenario.sources[0].emitters[0].level.p_tx_dbw
+    p500 = _resolve_doc(d, tmp_path).scenario.sources[0].emitters[0].lvl.p_tx_dbw
     d2 = copy.deepcopy(d)
     d2["frontend"] = {"t_ant_k": 1000}
-    p1000 = _resolve_doc(d2, tmp_path).scenario.sources[0].emitters[0].level.p_tx_dbw
+    p1000 = _resolve_doc(d2, tmp_path).scenario.sources[0].emitters[0].lvl.p_tx_dbw
     assert p500 is not None and p1000 is not None
     assert p1000 - p500 == pytest.approx(10 * math.log10(t_sys_k(1000, 1.465) / t_sys_k(500, 1.465)))
     assert p500 == pytest.approx(-2.227, abs=0.001)  # M1: METEOR-M2 3 at T_ant 500 K

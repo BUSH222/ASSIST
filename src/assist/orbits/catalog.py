@@ -62,6 +62,8 @@ def entries(sc: S.Scenario, base: Path, sources_only: bool = False) -> list[dict
             out[n] = dict(store.nearest(n, t0).omm)
     for src in sc.sources:
         o = src.orbit
+        if o is None:  # ground and local sources are not in the catalog
+            continue
         if isinstance(o, S.CatalogOrbit):
             if src.in_catalog and o.omm is not None:
                 out[o.norad] = dict(o.omm)

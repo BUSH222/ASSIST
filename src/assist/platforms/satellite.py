@@ -36,6 +36,8 @@ def truth_satellite(src: S.Source) -> tuple[EarthSatellite, int | None, str, dic
         a_km = k.a_km if k.a_km is not None else RE_KM + float(k.alt_km or 0.0)
         kep = Kepler(parse_iso(k.epoch), a_km, k.e, k.i_deg, k.raan_deg, k.argp_deg, k.m_deg, k.bstar)
     else:
+        if o is None:
+            raise ValueError(f"source {src.id}: a satellite needs an orbit")
         sp = o.synthetic_pass
         if sp.solution is None:
             raise ValueError(f"source {src.id}: synthetic pass not resolved")

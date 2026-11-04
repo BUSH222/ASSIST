@@ -7,8 +7,13 @@ Truth values follow the plan's definitions:
 - rx_dbm from the link budget (§6.2) with the AM gain at that instant; cn0 = rx_dbm - 30 - 10 log10(k T_sys).
 - active_fraction: share of [t, t + step) during which the schedule is on (half-amplitude edges).
 Frequencies are carried in integer mHz (see carrier.py), so the printed truth is exact to 1 mHz.
+
+Ground and local emitters (M7) have no geometry: a fixed received level (rx_dbm), no Doppler, always visible; their
+geometry columns are NaN. Events may carry per-event draws (M7): `offset_hz` (added to the frequency, integer mHz)
+and `level_db` (added to the level).
 """
 
+import math
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING
 
@@ -20,6 +25,7 @@ from assist.orbits.geometry import BLOCK_S
 if TYPE_CHECKING:
     from assist.emitters.carrier import Carrier
     from assist.emitters.schedules import AmModel, Event, Schedule
+    from assist.platforms.fixed import FixedPlatform
     from assist.platforms.satellite import SatellitePlatform
 
 
@@ -63,18 +69,35 @@ class Emitter:
     carrier: Carrier
     schedule: Schedule
     am: AmModel | None
-    p_tx_dbw: float
+    p_tx_dbw: float  # satellites (NaN for fixed platforms)
     tx_pattern: link.Pattern
     extra_loss_db: float
-    platform: SatellitePlatform
+    platform: SatellitePlatform | FixedPlatform
     rx_pattern: link.Pattern
     t_sys_k: float
     horizon: link.HorizonModel
     freqs_mhz: tuple[int, ...] = ()  # rest frequency per channel (f_nominal + offset); () = just carrier.rest_mhz
+    rx_dbm: float | None = None  # fixed platforms: received level (None: wideband, relative to the noise)
+    max_event_offset_hz: float = 0.0  # largest |per-event frequency offset|
+    per_event: bool = False  # events carry offset_hz / level_db draws
 
     @property
     def is_event(self) -> bool:
         return self.schedule.is_event
+
+    @property
+    def fixed(self) -> bool:
+        return self.platform.fixed
+
+    @property
+    def sat(self) -> SatellitePlatform:
+        """The satellite platform (fails for ground/local emitters)."""
+        from assist.platforms.satellite import SatellitePlatform
+
+        plat = self.platform
+        if not isinstance(plat, SatellitePlatform):
+            raise ValueError(f"{self.source_id}/{self.id}: not a satellite")
+        return plat
 
     @property
     def channels_mhz(self) -> tuple[int, ...]:
@@ -86,7 +109,10 @@ class Emitter:
     def link_dbm(
         self, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray, f_mhz: int | None = None
     ) -> np.ndarray:
-        """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2); at f_mhz if given."""
+        """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2); at f_mhz if given.
+        Fixed platforms: their received level."""
+        if self.platform.fixed:
+            return np.full(np.shape(el), np.nan if self.rx_dbm is None else self.rx_dbm)
         return link.p_rx_dbm(
             self.p_tx_dbw,
             self.tx_pattern.gain_db(off_nadir),
@@ -131,9 +157,32 @@ class Emitter:
         }
         return TruthArrays(f_rest_mhz=self.carrier.rest_mhz, **arrays)
 
+    def _truth_fixed(self, t: np.ndarray, step_s: float) -> TruthArrays:
+        nan = np.full(t.shape, np.nan)
+        rx, cn0 = self.level(t, nan, nan, nan, nan)
+        base = np.full(t.shape, self.carrier.rest_mhz, dtype=np.int64)
+        return TruthArrays(
+            t,
+            self.carrier.rest_mhz,
+            base,
+            np.zeros(t.shape, dtype=np.int64),
+            nan,
+            nan,
+            nan,
+            nan,
+            rx,
+            cn0,
+            self.schedule.active_fraction(t, step_s),
+            base / 1000.0,
+            np.zeros(t.shape),
+        )
+
     def _truth_chunk(self, t_all: np.ndarray, step_s: float) -> TruthArrays:
-        passes = self.platform.passes(float(t_all.min()), float(t_all.max()) + step_s) if t_all.size else []
-        keys_all = self.platform.geo.pass_keys(t_all, passes)
+        if self.platform.fixed:
+            return self._truth_fixed(t_all, step_s)
+        sat = self.sat
+        passes = sat.passes(float(t_all.min()), float(t_all.max()) + step_s) if t_all.size else []
+        keys_all = sat.geo.pass_keys(t_all, passes)
         vis = keys_all >= 0
         t, keys = t_all[vis], keys_all[vis]
         g = self.platform.geometry(t)
@@ -160,18 +209,34 @@ class Emitter:
 
     def event_truth(self, t0: float, t1: float) -> list[EventTruth]:
         """Events overlapping [t0, t1) whose midpoint is above the horizon; frequency and level at the midpoint
-        (each on its own channel)."""
+        (each on its own channel), per-event offset and level included."""
         events = self.schedule.events(t0, t1)
         if not events:
             return []
+        if self.per_event:
+            return [self._with_draws(e, et) for e, et in zip(events, self._event_truth(events), strict=True) if et]
+        return [et for et in self._event_truth(events) if et is not None]
+
+    @staticmethod
+    def _with_draws(e: Event, et: EventTruth | None) -> EventTruth:
+        assert et is not None
+        off = round(float(e.params.get("offset_hz", 0.0)) * 1000)
+        return EventTruth(e, et.f_rx_mhz + off, et.rx_dbm + float(e.params.get("level_db", 0.0)))
+
+    def _event_truth(self, events: list[Event]) -> list[EventTruth | None]:
+        if self.platform.fixed:
+            chans = self.channels_mhz
+            rx = math.nan if self.rx_dbm is None else self.rx_dbm
+            return [EventTruth(e, chans[self.event_channel(e)], rx) for e in events]
         mid = np.array([(e.start + e.end) / 2 for e in events])
         tr = self.truth(mid, 1.0)
         at = {float(x): i for i, x in enumerate(tr.t)}
         chans = self.channels_mhz
-        out = []
+        out: list[EventTruth | None] = []
         for e, m in zip(events, mid, strict=True):
             i = at.get(float(m))
             if i is None:
+                out.append(None)
                 continue
             shift = chans[self.event_channel(e)] - self.carrier.rest_mhz  # mHz
             if shift == 0:

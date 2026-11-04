@@ -24,6 +24,13 @@ and the absolute index, so the same samples come out whichever window is rendere
 the schedule envelope is not applied (bursts start and end in the signal). An emitter with several frequencies
 gets one EmitterRender per frequency, each rendering only the events on its own.
 
+**Ground and local emitters** (M7): no geometry, so the control samples are a constant amplitude (the received level)
+and the phase of the constant offset from the bin. Their events (and those of any emitter with per-event draws)
+are rendered one at a time: event signals from their start, continuous signals (cw) under the event's envelope
+with ramps, each multiplied by its own level (`level_db`) and shifted by its own frequency offset (`offset_hz`,
+phase 0 at the event's start sample), then summed; overlapping events (two transmitters on one channel) simply
+add, so they beat.
+
 **Narrow rate** (plan §4.2): r >= 1.25 (B + 2 max|f_rx - f_bin|), a multiple of 100 Hz and of the signal's rate
 step (the symbol rate, so samples per symbol are whole), with an FFT-friendly block length. The excursion bound
 covers the bin rounding, Doppler at the orbit's perigee speed (plus Earth rotation), 6 sigma of the per-pass
@@ -39,6 +46,7 @@ import numpy as np
 import scipy.fft as sfft
 
 from assist.emitters.link import C_M_S
+from assist.emitters.schedules import event_envelope
 from assist.orbits.geometry import BLOCK_S
 from assist.signals.base import lcm
 
@@ -58,6 +66,7 @@ EARTH_ROTATION_KM_S = 0.6  # bound on what Earth rotation adds to a LEO satellit
 OFFSET_SIGMAS = 6.0
 DRIFT_BOUND_S = 1800.0
 PASS_PAD_S = 0.002  # control samples this close outside a pass use that pass's carrier terms
+EVENT_PAD_S = 0.01  # per-event rendering: events this close outside a window are checked (filter tails, ramps)
 
 
 class RenderError(RuntimeError):
@@ -143,16 +152,23 @@ class EmitterRender:
         self.k_bin = (rest - fc_mhz + bin_mhz // 2) // bin_mhz
         self.f_bin_mhz = fc_mhz + self.k_bin * bin_mhz
         car = em.carrier
-        excursion = (
-            abs(rest - self.f_bin_mhz) / 1000.0
-            + rest / 1000.0 * max_speed_km_s(em.platform.sat) * 1000.0 / C_M_S
-            + OFFSET_SIGMAS * (car.pass_offset_sigma_hz or 0.0)
-            + (car.drift_hz_s or 0.0) * DRIFT_BOUND_S
-        )
+        self.fixed = em.fixed
+        # Ground/local emitters, and any with per-event draws, render their events one at a time (M7).
+        self.per_event = em.per_event or (self.fixed and em.is_event)
+        excursion = abs(rest - self.f_bin_mhz) / 1000.0 + em.max_event_offset_hz
+        if not self.fixed:
+            sat = em.sat.sat
+            excursion += (
+                rest / 1000.0 * max_speed_km_s(sat) * 1000.0 / C_M_S
+                + OFFSET_SIGMAS * (car.pass_offset_sigma_hz or 0.0)
+                + (car.drift_hz_s or 0.0) * DRIFT_BOUND_S
+            )
         self.bandwidth_hz = signal.bandwidth_hz()
         self.rate = narrow_rate(self.bandwidth_hz, excursion, signal.preferred_rate(), fs, m, signal.rate_step())
         self.n = self.rate * m // fs  # narrow samples per block
         self.limit_hz = (self.rate / RATE_MARGIN - self.bandwidth_hz) / 2
+        if self.fixed and abs(rest - self.f_bin_mhz) / 1000.0 + em.max_event_offset_hz > self.limit_hz:
+            raise RenderError(f"{self.id}: frequency excursion exceeds {self.limit_hz:.1f} Hz")
         self._ctl: OrderedDict[int, Control] = OrderedDict()
         self._streams: OrderedDict[int, Stream | None] = OrderedDict()
         self._hours: OrderedDict[int, list[Pass]] = OrderedDict()
@@ -201,7 +217,39 @@ class EmitterRender:
                 self._ctl.popitem(last=False)
         return ctl
 
+    def event_span(self, ev: Event) -> tuple[float, float]:
+        """Where an event's samples may be non-zero: the signal's bounds (event signals), else the event and ramps."""
+        if self.signal.mode == "event":
+            return self.signal.event_bounds(ev)
+        h = float(getattr(self.em.schedule, "ramp_s", 0.0)) / 2
+        return ev.start - h, ev.end + h
+
+    def _on(self, t_lo: float, t_hi: float) -> list[tuple[float, float]]:
+        """Intervals where the emitter's schedule (or its events) may be non-zero, overlapping [t_lo, t_hi]."""
+        if self.per_event:
+            evs = self.events(t_lo - EVENT_PAD_S, t_hi + EVENT_PAD_S)
+            return [self.event_span(e) for e in evs]
+        if self.signal.mode == "event":
+            return [(e.start, e.end) for e in self.events(t_lo, t_hi + 1e-3)]
+        return self.em.schedule.active_intervals(t_lo, t_hi + 1e-3)
+
+    def _control_fixed(self, chunk: int) -> Control:
+        """Ground/local: constant amplitude, the phase of the constant offset from the bin (exact, integers)."""
+        k0 = chunk * self.chunk_ms
+        k = np.arange(k0, k0 + self.chunk_ms + 2 * self.hop_ms + 1, dtype=np.int64)
+        t_lo, t_hi = k0 / 1000.0, float(k[-1]) / 1000.0
+        rx = self.em.rx_dbm
+        amp = np.full(k.shape, 0.0 if rx is None else 10 ** (rx / 20))
+        delta = self.rest_mhz - self.f_bin_mhz
+        r0 = (delta * k0) % 1_000_000
+        cyc = (r0 + delta * (k - k0)) / 1e6
+        cyc -= math.floor(cyc[0])
+        visible = [(t_lo - 1.0, t_hi + 1.0)]
+        return Control(int(k0), amp, cyc, visible, _intersect(visible, self._on(t_lo, t_hi)))
+
     def _compute_control(self, chunk: int) -> Control:
+        if self.fixed:
+            return self._control_fixed(chunk)
         em, car = self.em, self.em.carrier
         k0 = chunk * self.chunk_ms
         k = np.arange(k0, k0 + self.chunk_ms + 2 * self.hop_ms + 1, dtype=np.int64)  # covers the chunk's blocks
@@ -219,7 +267,7 @@ class EmitterRender:
             key[sel] = p.aos_key
             base[sel] = self.rest_mhz + off
             drift[sel] = d
-        g = em.platform.geo.geometry_ms(k)
+        g = em.sat.geo.geometry_ms(k)
         amp = 10 ** (em.link_dbm(g.el_deg, g.az_deg, g.range_m, g.off_nadir_deg, self.rest_mhz) / 20)
         # Constant-frequency part: (f - f_bin)[mHz] * t[ms] / 1e6 cycles, reduced mod 1 cycle with integers.
         delta = base - self.f_bin_mhz
@@ -234,11 +282,7 @@ class EmitterRender:
         cyc += 0.5 * drift * dt_aos**2 - f_tx * g.range_m / C_M_S
         cyc -= math.floor(cyc[0])
         visible = [(p.aos, p.los) for p in passes]
-        if self.signal.mode == "event":
-            on = [(e.start, e.end) for e in self.events(t_lo, t_hi + 1e-3)]
-        else:
-            on = em.schedule.active_intervals(t_lo, t_hi + 1e-3)
-        active = _intersect(visible, on)
+        active = _intersect(visible, self._on(t_lo, t_hi))
         self._check_excursion(t, cyc, active)
         return Control(int(k0), amp, cyc, visible, active)
 
@@ -251,7 +295,7 @@ class EmitterRender:
         for a, b in active:
             on |= (tm >= a) & (tm < b)
         if on.any():
-            worst = float(np.max(np.abs(f[on])))
+            worst = float(np.max(np.abs(f[on]))) + self.em.max_event_offset_hz
             if worst > self.limit_hz:
                 raise RenderError(
                     f"{self.id}: frequency excursion {worst:.1f} Hz from the bin exceeds {self.limit_hz:.1f} Hz "
@@ -290,7 +334,10 @@ class EmitterRender:
         vis = np.zeros(t.shape, dtype=bool)
         for a, z in ctl.visible:
             vis |= (t >= a) & (t < z)
-        if self.signal.mode == "event":
+        if self.per_event:
+            env = vis.astype(np.float64)
+            x = self._events_x(n0, k, float(t[0]), float(t[-1]))
+        elif self.signal.mode == "event":
             env = vis.astype(np.float64)
             x = self.signal.render_events(self.events(float(t[0]), float(t[-1]) + 1e-3), n0, k, self.rate)
         else:
@@ -300,3 +347,32 @@ class EmitterRender:
             env = env * 10 ** (self.em.am.gain_db(t) / 20)
         v = self.dsp.nco(x, amp * env, cyc)
         return Stream(v, active.astype(np.uint8))
+
+    def _events_x(self, n0: int, k: int, t_lo: float, t_hi: float) -> np.ndarray:
+        """Narrow samples [n0, n0 + k) of the events touching [t_lo, t_hi], one at a time, each with its own level and
+        frequency offset (M7)."""
+        x = np.zeros(k, dtype=np.complex64)
+        rate = self.rate
+        ramp = float(getattr(self.em.schedule, "ramp_s", 0.0))
+        for ev in self.events(t_lo - EVENT_PAD_S, t_hi + EVENT_PAD_S):
+            b0, b1 = self.event_span(ev)
+            j0 = max(0, math.ceil(b0 * rate) - n0)
+            j1 = min(k, math.floor(b1 * rate) - n0 + 1)
+            if j1 <= j0:
+                continue
+            m = j1 - j0
+            if self.signal.mode == "event":
+                xe = self.signal.render_events([ev], n0 + j0, m, rate)
+            else:
+                idx = n0 + np.arange(j0, j1, dtype=np.int64)
+                env = event_envelope(idx / rate, ev.start, ev.end, ramp)
+                xe = env.astype(np.complex64) if self.signal.constant else self.signal.render(n0 + j0, m, rate) * env
+            g = 10 ** (float(ev.params.get("level_db", 0.0)) / 20)
+            off = float(ev.params.get("offset_hz", 0.0))
+            if off:
+                dn = n0 + np.arange(j0, j1, dtype=np.int64) - round(ev.start * rate)
+                xe = xe * (g * np.exp(2j * np.pi * (off * dn / rate)))
+            elif g != 1.0:
+                xe = xe * g
+            x[j0:j1] += xe.astype(np.complex64)
+        return x

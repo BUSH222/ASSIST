@@ -1,4 +1,4 @@
-"""`assist profile build | labels | report` (plan §8, §9)."""
+"""`assist profile build | labels | report | terrestrial` (plan §8, §9)."""
 
 from pathlib import Path
 from typing import Annotated
@@ -91,3 +91,37 @@ def report(
 
     path = write_report(profile, out, work)
     typer.echo(f"report: {path}")
+
+
+@app.command()
+def terrestrial(
+    profile: Annotated[Path, typer.Argument(help="Profile directory.")] = Path("profiles/vhf137"),
+    samples: SamplesOpt = Path("samples"),
+    wav: Annotated[Path | None, typer.Option(help="Recording (default: the one baseband_*.wav).")] = None,
+    events: Annotated[Path, typer.Option(help="Event list of the waterfall days (from build).")] = Path(
+        "out/profile/events.csv"
+    ),
+    t_from: Annotated[float, typer.Option("--from", help="Clean part of the recording: start (s).")] = 445.0,
+    t_to: Annotated[float, typer.Option("--to", help="End (s): before the ORBCOMM pass.")] = 1405.0,
+    band: Annotated[
+        bool, typer.Option("--band", help="Only (re)write bands/vhf137/terrestrial_default.yaml from the profile.")
+    ] = False,
+    work: Annotated[Path, typer.Option(help="Cache directory.")] = Path("out/profile/cache"),
+) -> None:
+    """P14 (M7): measure VDL bursts in the recording and AM / 138 MHz levels in the event list (terrestrial.json),
+    then write the band's terrestrial scenario from the profile."""
+    import json
+
+    from assist.config.loader import band_dir
+    from assist.profile import terrestrial as ter
+
+    if not band:
+        from assist.profile.wavio import Recording
+
+        rec = Recording(wav or _one(samples, "baseband_*.wav"))
+        res = ter.measure(rec, profile, events, t_from, t_to, lambda m: typer.echo(m, err=True), work)
+        (profile / "terrestrial.json").write_text(json.dumps(res, indent=1) + "\n")
+        typer.echo(f"-> {profile / 'terrestrial.json'}")
+    out = band_dir("vhf137") / "terrestrial_default.yaml"
+    out.write_text(ter.band_yaml(profile))
+    typer.echo(f"-> {out}")

@@ -1,0 +1,31 @@
+# The recording's hour with the terrestrial environment (the M7 check: does it look like the recording?).
+# The clock starts with the recording (baseband_137000000Hz_19-39-00_01-11-2026.wav, 16:39:00 UTC), so the hourly
+# rates are the recording's. Sources: bands/vhf137/terrestrial_default.yaml (VDL ground stations and aircraft bursts,
+# airband AM voice, the 138.1104 MHz carrier, USB humps, birdies) plus ORBCOMM FM117, the only satellite in the
+# recording (AOS 17:02:31 UTC; its measured channels S-5/S-8 and +402 Hz oscillator offset, M1; no gateway seen).
+# Needs samples/ (element snapshots). Not modelled yet (M8): the recording's clipping outside VDL bursts, the local
+# interference until 16:46 UTC, DC, IM3.
+#
+# From the repository root:
+#   uv run assist serve scenarios/terrestrial_hour.yaml                  # rtl_tcp, paced from 16:39:00 (past date)
+#   uv run assist render scenarios/terrestrial_hour.yaml -o out/m7/hour --format cu8 --duration 10min
+#   uv run assist truth scenarios/terrestrial_hour.yaml -o out/m7/truth.csv --to +10min   # every burst
+version: 1
+seed: 7
+clock: {start: "2026-11-01T16:39:00Z", duration: 1h}
+profile: profiles/vhf137
+elements:
+  files: [samples/active.csv, samples/satnogs.csv]
+include: [bands/vhf137/terrestrial_default.yaml]
+sinks:
+  - rtl_tcp: {port: 1234}
+sources:
+  - id: fm117
+    preset: orbcomm
+    orbit: {norad: 41188}
+    channels: [S-5, S-8]
+    offset_hz: 402.5
+    gateway: {enabled: false}
+  - id: met
+    preset: meteor_lrpt
+    orbit: {synthetic_pass: {aos: -4min, max_el_deg: 70, direction: desc, side: east}}

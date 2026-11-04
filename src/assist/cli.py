@@ -153,6 +153,8 @@ def passes(
     scene = Scene(r.scenario)
     rows = []
     for s in scene.sources:
+        if s.platform.fixed:
+            continue
         for p in s.platform.passes(a, b):
             g = s.platform.geometry(np.array([p.aos, p.tca, p.los]))
             rows.append(
@@ -222,18 +224,26 @@ def truth(
     t_to: ToOpt = None,
     step: Annotated[str, typer.Option(help="Row step, e.g. 1s, 100ms.")] = "1s",
     fmt: Annotated[str, typer.Option("--format", help="csv or jsonl")] = "csv",
+    platforms: Annotated[
+        str, typer.Option(help="Comma-separated platform kinds to include: satellite, ground, local.")
+    ] = "satellite,ground,local",
     set_: SetOpt = None,
 ) -> None:
-    """Truth for every emitter: frequencies, Doppler, geometry and levels per step, plus an event list."""
+    """Truth for every emitter: frequencies, Doppler, geometry and levels per step, plus an event list (every burst
+    with its frequency and strength)."""
     from assist import truth as tr
     from assist.engine.scene import Scene
     from assist.timebase import parse_duration
 
     if fmt not in ("csv", "jsonl"):
         raise typer.BadParameter("--format must be csv or jsonl")
+    kinds = tuple(k.strip() for k in platforms.split(",") if k.strip())
+    bad = [k for k in kinds if k not in tr.PLATFORMS]
+    if bad or not kinds:
+        raise typer.BadParameter(f"--platforms takes {', '.join(tr.PLATFORMS)} (got {platforms!r})")
     r = _resolve(scenario, set_)
     a, b = _window(r, t_from, t_to)
-    table = tr.compute(Scene(r.scenario), a, b, parse_duration(step))
+    table = tr.compute(Scene(r.scenario), a, b, parse_duration(step), kinds)
     write = tr.write_csv if fmt == "csv" else tr.write_jsonl
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("w", newline="") as f:

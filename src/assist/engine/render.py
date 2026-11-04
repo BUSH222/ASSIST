@@ -13,15 +13,16 @@ Renderer keeps (fresh 19 MB arrays every chunk cost page faults, which contend b
 per-chunk results (`signal`, `chunk_iq`, `chunk_u8`) are views valid until the next chunk replaces them.
 
 Signals pass the receiver response (the profile's noise shape) in the frequency domain; noise is shaped by the same
-FIR in time. Image, IM3, DC, edge aliasing and the diurnal noise level are M7; the crystal error (ppm) must be 0
-until then.
+FIR in time. Wideband local emitters (M7: the USB humps) are added in the time domain before the ADC, without the
+receiver response. Image, IM3, DC, edge aliasing and the diurnal noise level are M8; the crystal error (ppm) must
+be 0 until then.
 """
 
 import math
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -29,6 +30,7 @@ from assist.config.loader import load_band
 from assist.engine.control import HOPS_PER_CHUNK, EmitterRender
 from assist.engine.frontend import Frontend, noise_spec
 from assist.engine.synth import synth_blocks
+from assist.engine.wideband import WideRender
 from assist.orbits.geometry import BLOCK_S
 from assist.signals.base import Keys, make_signal
 
@@ -41,7 +43,7 @@ if TYPE_CHECKING:
 
 CHUNK_HOPS = HOPS_PER_CHUNK  # 1 s
 PREFETCH_S = 60.0  # live serving: next hour's passes and geometry are computed during the last minute of an hour
-STAGES = ("control", "synth", "noise", "adc", "prefetch")
+STAGES = ("control", "synth", "wideband", "noise", "adc", "prefetch")
 
 
 class Renderer:
@@ -62,7 +64,7 @@ class Renderer:
         sc = scene.scenario
         fe = sc.frontend
         if fe.ppm != 0:
-            raise ValueError("frontend.ppm must be 0 until M7")
+            raise ValueError("frontend.ppm must be 0 until M8")
         if dsp is None:
             from assist.backend import dsp
         self.dsp = dsp
@@ -78,10 +80,14 @@ class Renderer:
         self.noise_on = noise
         self.prefetch = prefetch
         self.emitters: list[EmitterRender] = []
+        self.wide: list[WideRender] = []
         for src in scene.sources:
             params = {e.id: e.signal.params for e in src.config.emitters}
             for em in src.emitters:
                 sig = make_signal(em.signal_kind, params[em.id], Keys(scene.rng, src.id, em.id), self.dsp)
+                if sig.mode == "wideband":
+                    self.wide.append(WideRender(em, sig, fe.fc_hz, self.fs, self.hop, CHUNK_HOPS))
+                    continue
                 for ch in range(len(em.channels_mhz)):  # one per frequency (LoRa channels)
                     self.emitters.append(EmitterRender(em, sig, fe.fc_hz, self.fs, self.hop, self.m, self.dsp, ch))
         self.times: dict[str, float] = dict.fromkeys(STAGES, 0.0)  # seconds spent per stage (bench)
@@ -153,6 +159,17 @@ class Renderer:
                 sig = buf[:n]
                 sig[:] = 0
             sig[: self.hop] += prev
+        if self.wide:
+            tic = time.perf_counter()
+            for wr in self.wide:
+                w = wr.chunk(c)
+                if w is None:
+                    continue
+                if sig is None:
+                    sig = buf[:n]
+                    sig[:] = 0
+                sig += w
+            self.times["wideband"] += time.perf_counter() - tic
         self._keep_tail(c, tail)
         self._sig = (c, sig)
         return sig
@@ -204,18 +221,34 @@ class Renderer:
 
     def _prefetch(self, c: int) -> None:
         """Live serving: in the last PREFETCH_S of an hour, compute the next hour's passes, a few emitters a chunk."""
-        if not self.prefetch or not self.emitters:
+        if not self.prefetch or not (self.emitters or self.wide):
             return
         t = c * CHUNK_HOPS * self.hop // self.fs  # Unix second of chunk c
         if t % BLOCK_S < BLOCK_S - PREFETCH_S:
             return
         nxt = t // BLOCK_S + 1
-        todo = [er for er in self.emitters if not er.has_hour(nxt)]
-        per = max(1, math.ceil(len(self.emitters) / (PREFETCH_S / 2)))  # done within the first half minute
+        tic = time.perf_counter()
+        for sch in self._event_schedules():  # next hour's events (a VDL station draws ~9000), one per chunk
+            if not sch.has_slot(nxt):
+                sch.prefetch(nxt)
+                break
+        self.times["prefetch"] += time.perf_counter() - tic
+        todo = [er for er in self.emitters if not er.fixed and not er.has_hour(nxt)]
+        n_sat = sum(1 for er in self.emitters if not er.fixed)
+        per = max(1, math.ceil(n_sat / (PREFETCH_S / 2)))  # done within the first half minute
         tic = time.perf_counter()
         for er in todo[:per]:
             er.prefetch_hour(nxt)
         self.times["prefetch"] += time.perf_counter() - tic
+
+    def _event_schedules(self) -> list[Any]:
+        out, seen = [], set()
+        for em in [er.em for er in self.emitters] + [wr.em for wr in self.wide]:
+            sch = em.schedule
+            if sch.is_event and id(sch) not in seen:
+                seen.add(id(sch))
+                out.append(sch)
+        return out
 
     # --- by absolute sample index ---
 

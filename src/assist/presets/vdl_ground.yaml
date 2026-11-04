@@ -1,0 +1,12 @@
+# VDL Mode 2 ground station (plan §6.5, M7): D8PSK bursts (10.5 ksym/s, raised cosine alpha 0.6) on one channel at a
+# fixed received level, Poisson-timed with a dead time (one transmitter: its bursts never overlap). Give `freq_hz`,
+# the level (`level: {cn0_dbhz: ...}`) and the rate (`schedule: {rate_per_hour: ...}`, a number or 24 UTC-hour
+# values); the signal's `burst_ms` sets the burst lengths. VDL Mode 4 (GFSK, as on 136.925 MHz here): give
+# `signal: {kind: gfsk}`.
+platform: ground
+emitters:
+  - id: vdl
+    signal: {kind: d8psk}
+    freq_hz: 136.975e6
+    schedule: {type: poisson_events, rate_per_hour: 3600, min_gap_s: 0.05}
+    level: {cn0_dbhz: 55}

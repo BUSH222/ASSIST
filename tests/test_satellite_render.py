@@ -132,7 +132,7 @@ def test_presets_resolve(resolved) -> None:
     assert [e.freq_hz for e in oc.emitters] == [137.225e6, 137.7125e6, 137.56e6]
     assert all(e.channel is None for e in oc.emitters)  # resolved into freq_hz
     assert oc.emitters[2].enabled and oc.emitters[2].signal.kind == "oqpsk_burst"
-    assert all("cal orbcomm" in str(e.level.resolved_from) for e in oc.emitters)
+    assert all("cal orbcomm" in str(e.lvl.resolved_from) for e in oc.emitters)
     assert sb.emitters[0].freq_hz == 137.099e6 and sb.emitters[0].signal.kind == "lora"
     # Resolving the resolved document changes nothing.
     again = resolve_document(sc.model_dump(mode="json"), ROOT)
@@ -179,7 +179,7 @@ def test_meteor_auto_calibration(tmp_path: Path) -> None:
     for norad, cal in ((57166, "meteor_m2_3"), (41188, "meteor")):
         doc["sources"] = [{**src, "orbit": {"norad": norad}}]
         p.write_text(yaml.safe_dump(doc))
-        lv = resolve_document(load_scenario(p), ROOT).scenario.sources[0].emitters[0].level
+        lv = resolve_document(load_scenario(p), ROOT).scenario.sources[0].emitters[0].lvl
         assert str(lv.resolved_from).startswith(f"cal meteor_auto -> cal {cal} ")
 
 

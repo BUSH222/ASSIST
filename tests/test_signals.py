@@ -63,7 +63,7 @@ def test_params_get_defaults_and_reject_typos() -> None:
     assert check_params("sdpsk", {})["rs"] == 4800 and check_params("sdpsk", {})["alpha"] == 0.4
     assert check_params("oqpsk_burst", {})["blocks"] == [4, 5]
     assert check_params("lora", {})["sf"] == [7, 12] and check_params("lora", {})["payload_bytes"] == [10, 60]
-    assert check_params("d8psk", {"anything": 1}) == {"anything": 1}  # not implemented yet: unchecked
+    assert check_params("bank_clip", {"anything": 1}) == {"anything": 1}  # not implemented: unchecked
     with pytest.raises(ValidationError, match="extra"):
         check_params("oqpsk", {"rolloff": 0.5})
     with pytest.raises(ValidationError, match="span must be even"):
@@ -298,7 +298,15 @@ def test_lora_burst_length_structure_and_slope(sf: int) -> None:
 def test_lora_schedule_draws_are_keyed_and_random_access() -> None:
     cls, p = event_maker("lora", {})
     assert isinstance(p, L.LoraParams)
-    maker = EventMaker(lambda g: cls.draw_event(p, g), cls.max_duration_s(p))
+    upper = cls.max_duration_s(p)
+    assert upper is not None
+
+    def draw(g: np.random.Generator) -> tuple[float, dict[str, Any]]:
+        d, prm = cls.draw_event(p, g)
+        assert d is not None
+        return d, prm
+
+    maker = EventMaker(draw, upper)
     sch = ExpGaps(KeyedRng(3), "s", "lora", DurationDist(), 180.0, 20.0, maker)
     evs = sch.events(T0, T0 + 6 * 3600)
     assert len(evs) > 60

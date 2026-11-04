@@ -7,7 +7,8 @@ in everything that depends on files or draws:
 - synthetic passes: absolute AOS, direction/side (keyed draws if absent) and the solved orbit;
 - keyed defaults: on/off phase, AM phase; channels (names from the band's channel table, e.g. ORBCOMM S-1 .. S-12)
   turned into frequencies, an emitter's `channel` into its freq_hz; frequencies quantised to 1 mHz;
-- levels as p_tx_dbw (from p_tx_dbw, cn0_zenith_dbhz or a calibration);
+- levels as p_tx_dbw (from p_tx_dbw, cn0_zenith_dbhz or a calibration); ground and local transmitters (M7) as
+  rx_dbm (from cn0_dbhz or rx_dbm);
 - package version and content hashes of the band and profile.
 
 Resolving a resolved document returns it unchanged. The scenario hash is the sha256 of the canonical JSON (sorted
@@ -189,6 +190,8 @@ def _orbit(cx: _Ctx, src: S.Source, station: Station) -> tuple[Any, bool]:
         return o, True
     if isinstance(o, S.KeplerOrbit):
         return o, False
+    if o is None:
+        raise ConfigError(f"source {src.id}: a satellite needs an orbit")
     sp = o.synthetic_pass
     aos = parse_time(sp.aos, cx.t0)
     direction = sp.direction or cx.choice(src.id, "orbit.synthetic_pass.direction", ["asc", "desc"])
@@ -207,10 +210,38 @@ def _set_of(o: S.CatalogOrbit) -> ElementSet:
     return ElementSet(o.norad, str(o.omm.get("OBJECT_NAME", "")), epoch_unix(o.omm), o.omm)
 
 
-def _level(cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: float) -> S.Level:
+def _fixed_level(cx: _Ctx, src: S.Source, e: S.Emitter) -> S.Level | None:
+    """Ground/local: the received level as rx_dbm (from cn0_dbhz against k T_sys, or rx_dbm)."""
     lv = e.level
-    if lv.resolved_from is not None:
+    if lv is None or lv.resolved_from is not None:
         return lv
+    if lv.cn0_dbhz is None and lv.rx_dbm is None:
+        raise ConfigError(f"source {src.id}: emitter {e.id}: a {src.platform} level is cn0_dbhz or rx_dbm")
+    if lv.rx_dbm is not None:
+        rx, how = lv.rx_dbm - lv.extra_loss_db, "rx_dbm"
+    else:
+        t_sys = t_sys_of(cx.sc.frontend)
+        assert lv.cn0_dbhz is not None
+        rx = lv.cn0_dbhz - lv.extra_loss_db + 30 + link.kt_dbw_hz(t_sys)
+        how = f"cn0_dbhz {lv.cn0_dbhz} at T_sys {t_sys:.1f} K"
+    if lv.extra_loss_db:
+        how += f", extra loss {lv.extra_loss_db} dB"
+    return S.Level(rx_dbm=rx, resolved_from=how)
+
+
+def _level(cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: float) -> S.Level | None:
+    if src.platform != "satellite":
+        return _fixed_level(cx, src, e)
+    lv = e.lvl
+    if lv.resolved_from is not None:
+        if lv.p_tx_dbw is None:
+            raise ConfigError(f"source {src.id}: emitter {e.id}: a satellite's resolved level is p_tx_dbw")
+        return lv
+    if lv.cn0_dbhz is not None or lv.rx_dbm is not None:
+        raise ConfigError(
+            f"source {src.id}: emitter {e.id}: cn0_dbhz / rx_dbm are for ground and local sources; "
+            "a satellite takes p_tx_dbw, cn0_zenith_dbhz or cal"
+        )
     t_sys = t_sys_of(cx.sc.frontend)
     if lv.p_tx_dbw is not None:
         p, how = lv.p_tx_dbw, "p_tx_dbw"
@@ -241,7 +272,7 @@ def _level(cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: flo
         k = table[str(lv.cal)]
         p = link.p_tx_from_link_const(k, t_sys)
         how = f"cal {lv.cal} from {where}: link constant {k:.3f} dB-Hz, T_sys {t_sys:.1f} K"
-        if e.level.cal == METEOR_AUTO:
+        if e.lvl.cal == METEOR_AUTO:
             how = f"cal {METEOR_AUTO} -> {how}"
     return S.Level(p_tx_dbw=p, extra_loss_db=lv.extra_loss_db, resolved_from=how)
 
@@ -301,7 +332,10 @@ def resolve_document(doc: dict[str, Any], base: Path, now: float | None = None) 
     station = Station(sc.station.lat, sc.station.lon, sc.station.alt_m, sc.station.tz)
     sources = []
     for src in sc.sources:
-        orbit, catalog = _orbit(cx, src, station)
+        if src.platform == "satellite":
+            orbit, catalog = _orbit(cx, src, station)
+        else:
+            orbit, catalog = None, False
         in_cat = src.in_catalog if src.in_catalog is not None else catalog
         norad = src.catalog_norad
         if in_cat and not catalog and norad is None:

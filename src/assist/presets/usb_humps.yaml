@@ -1,0 +1,12 @@
+# USB noise humps (plan §6.5, M1 P8): episodes of a wandering comb of noise ripples across the whole band, added
+# inside the receiver (local, no receiver response). Spacing, ripple amplitude and wander speed are drawn per episode
+# from the waterfall days' statistics.
+platform: local
+emitters:
+  - id: comb
+    signal: {kind: noise_comb}
+    freq_hz: 137.0e6
+    schedule:
+      type: poisson_events
+      rate_per_hour: 2
+      duration: {dist: lognormal, median_s: 60, sigma: 0.86, max_s: 900}

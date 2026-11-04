@@ -21,6 +21,7 @@ from assist.config.schema import CatalogOrbit
 from assist.engine.scene import Scene
 from assist.orbits import catalog as cat
 from assist.orbits import elements as E
+from assist.platforms.satellite import SatellitePlatform
 from assist.timebase import parse_iso
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -127,7 +128,9 @@ def test_catalog_entries() -> None:
     assert full[57166] == m23.orbit.omm  # published, not perturbed
     # Synthetic in-catalog object: its exported elements reproduce the truth orbit
     sat_cat = E.satellite_from_omm(full[kep.catalog_norad])
-    sat_truth = Scene(sc).source("kep").platform.sat
+    plat = Scene(sc).source("kep").platform
+    assert isinstance(plat, SatellitePlatform)
+    sat_truth = plat.sat
     t = E.timescale().utc(2026, 11, 1, 18)
     d = np.asarray(sat_cat.at(t).position.km) - np.asarray(sat_truth.at(t).position.km)
     assert np.linalg.norm(d) < 1e-3

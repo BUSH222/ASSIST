@@ -8,15 +8,20 @@ All schedules are functions of absolute Unix time, so any window can be evaluate
   next. Generated per UTC hour slot from the keyed stream (source_id, emitter_id, "slot", hour_index); each slot
   starts a fresh chain at slot start + one gap, so slots are independent (random access).
 - `poisson_events`: per hour slot, N ~ Poisson(rate for that UTC hour), starts uniform in the hour, durations from
-  the configured distribution (clipped to max_s <= 1 h). Same keyed stream per slot.
+  the configured distribution (clipped to max_s <= 1 h). Same keyed stream per slot. With `min_gap_s` (M7, one
+  transmitter) an event starting less than min_gap_s after the previous kept event's end is dropped afterwards (a
+  dead time: the kept rate is rate / (1 + rate * (duration + min_gap_s))).
 
 Event signals (LoRa, M6) set an event maker: each event's duration and parameters (spreading factor, payload
 length, the frequency index of a multi-frequency emitter) come from it, drawn from the same slot stream in place of
-the duration distribution.
+the duration distribution. M7: so do emitters with per-event draws (frequency offset and level), and `ramp_ms`
+gives continuous signals under an event schedule raised-cosine ramps centred on each event's edges.
 """
 
+import bisect
 import math
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, override
 
@@ -29,6 +34,7 @@ if TYPE_CHECKING:
 
 
 SLOT_S = 3600
+SLOT_CACHE = 6  # hour slots kept per schedule (a VDL station has ~9000 events per hour)
 
 
 @dataclass(frozen=True)
@@ -166,11 +172,18 @@ class _EventSchedule(Schedule):
     is_event = True
 
     def __init__(
-        self, rng: KeyedRng, source_id: str, emitter_id: str, duration: DurationDist, maker: EventMaker | None = None
+        self,
+        rng: KeyedRng,
+        source_id: str,
+        emitter_id: str,
+        duration: DurationDist,
+        maker: EventMaker | None = None,
+        ramp_ms: float = 0.0,
     ) -> None:
         self.rng, self.source_id, self.emitter_id, self.duration = rng, source_id, emitter_id, duration
         self.maker = maker
-        self._slots: dict[int, list[Event]] = {}
+        self.ramp_s = ramp_ms / 1000.0
+        self._slots: OrderedDict[int, tuple[list[Event], list[float]]] = OrderedDict()
 
     @property
     def upper_s(self) -> float:
@@ -189,18 +202,37 @@ class _EventSchedule(Schedule):
     @abstractmethod
     def _slot_events(self, g: np.random.Generator, slot: int) -> list[Event]: ...
 
-    def slot(self, h: int) -> list[Event]:
-        ev = self._slots.get(h)
-        if ev is None:
+    def _slot(self, h: int) -> tuple[list[Event], list[float]]:
+        hit = self._slots.get(h)
+        if hit is None:
             ev = self._slot_events(self.rng.stream(self.source_id, self.emitter_id, "slot", h), h)
-            self._slots[h] = ev
-        return ev
+            hit = (ev, [e.start for e in ev])  # starts are sorted within a slot
+            self._slots[h] = hit
+            while len(self._slots) > SLOT_CACHE:
+                self._slots.popitem(last=False)
+        else:
+            self._slots.move_to_end(h)
+        return hit
+
+    def slot(self, h: int) -> list[Event]:
+        return self._slot(h)[0]
+
+    def prefetch(self, h: int) -> None:
+        """Draw hour slot h ahead of need (live serving)."""
+        self._slot(h)
+
+    def has_slot(self, h: int) -> bool:
+        return h in self._slots
 
     @override
     def events(self, t0: float, t1: float) -> list[Event]:
         """Events overlapping [t0, t1), ordered by start."""
-        h0 = math.floor((t0 - self.upper_s) / SLOT_S)
-        out = [e for h in range(h0, math.floor(t1 / SLOT_S) + 1) for e in self.slot(h) if e.end > t0 and e.start < t1]
+        lo = t0 - self.upper_s
+        out = []
+        for h in range(math.floor(lo / SLOT_S), math.floor(t1 / SLOT_S) + 1):
+            ev, starts = self._slot(h)
+            i0, i1 = bisect.bisect_left(starts, lo), bisect.bisect_left(starts, t1)
+            out.extend(e for e in ev[i0:i1] if e.end > t0)
         return sorted(out, key=lambda e: e.start)
 
     @override
@@ -215,17 +247,32 @@ class _EventSchedule(Schedule):
 
     @override
     def active_intervals(self, t0: float, t1: float) -> list[tuple[float, float]]:
-        return [(e.start, e.end) for e in self.events(t0, t1)]
+        h = self.ramp_s / 2
+        return [(e.start - h, e.end + h) for e in self.events(t0 - h, t1 + h)]
 
     @override
     def envelope(self, t: np.ndarray) -> np.ndarray:
-        """1 inside an event, else 0 (burst ramps belong to the signal, from M6/M8)."""
+        """1 inside an event, else 0, with raised-cosine ramps of ramp_ms centred on the edges (burst ramps of event
+        signals belong to the signal)."""
         t = np.asarray(t, dtype=np.float64)
         out = np.zeros(t.shape)
         if t.size:
-            for e in self.events(float(t.min()), float(t.max()) + 1.0):
-                out[(t >= e.start) & (t < e.end)] = 1.0
+            r = self.ramp_s
+            for e in self.events(float(t.min()) - r, float(t.max()) + 1.0):
+                out = np.maximum(out, event_envelope(t, e.start, e.end, r))
         return out
+
+
+def event_envelope(t: np.ndarray, start: float, end: float, ramp_s: float) -> np.ndarray:
+    """Envelope of one event: 1 on [start, end) (half-amplitude edges), raised-cosine ramps of ramp_s centred on the
+    edges (shortened to the event's length), 0 outside."""
+    t = np.asarray(t, dtype=np.float64)
+    if ramp_s <= 0:
+        return ((t >= start) & (t < end)).astype(np.float64)
+    r = min(ramp_s, end - start)
+    u = np.clip((t - (start - r / 2)) / r, 0, 1)
+    d = np.clip(((end + r / 2) - t) / r, 0, 1)
+    return 0.5 * (1 - np.cos(np.pi * u)) * 0.5 * (1 - np.cos(np.pi * d)) * (u > 0) * (d > 0)
 
 
 class ExpGaps(_EventSchedule):
@@ -238,10 +285,11 @@ class ExpGaps(_EventSchedule):
         mean_gap_s: float = 180.0,
         min_gap_s: float = 20.0,
         maker: EventMaker | None = None,
+        ramp_ms: float = 0.0,
     ) -> None:
         if not 0 <= min_gap_s <= mean_gap_s:
             raise ValueError("exp_gaps needs 0 <= min_gap_s <= mean_gap_s")
-        super().__init__(rng, source_id, emitter_id, duration, maker)
+        super().__init__(rng, source_id, emitter_id, duration, maker, ramp_ms)
         if self.upper_s > min_gap_s:
             raise ValueError("exp_gaps: event durations (max_s) must not exceed min_gap_s, or slots could overlap")
         self.mean_gap_s, self.min_gap_s = mean_gap_s, min_gap_s
@@ -270,11 +318,14 @@ class PoissonEvents(_EventSchedule):
         duration: DurationDist,
         rate_per_hour: float | Sequence[float] = 1.0,
         maker: EventMaker | None = None,
+        ramp_ms: float = 0.0,
+        min_gap_s: float = 0.0,
     ) -> None:
-        super().__init__(rng, source_id, emitter_id, duration, maker)
+        super().__init__(rng, source_id, emitter_id, duration, maker, ramp_ms)
         if self.upper_s > SLOT_S:
             raise ValueError("poisson_events: max_s must be <= 3600 s")
         self.rate_per_hour = rate_per_hour
+        self.min_gap_s = min_gap_s
 
     def rate(self, slot: int) -> float:
         r = self.rate_per_hour
@@ -285,9 +336,17 @@ class PoissonEvents(_EventSchedule):
         n = int(g.poisson(self.rate(slot)))
         starts = np.sort(g.uniform(0.0, SLOT_S, n)) + slot * SLOT_S
         if self.maker is not None:
-            return [self._event(g, float(s)) for s in starts]
-        durs = self.duration.draw(g, n)
-        return [Event(float(s), float(s + d), {"duration_s": float(d)}) for s, d in zip(starts, durs, strict=True)]
+            out = [self._event(g, float(s)) for s in starts]
+        else:
+            durs = self.duration.draw(g, n)
+            out = [Event(float(s), float(s + d), {"duration_s": float(d)}) for s, d in zip(starts, durs, strict=True)]
+        if self.min_gap_s > 0:  # one transmitter: drop events that would start too soon (all drawn first: keyed)
+            kept: list[Event] = []
+            for e in out:
+                if not kept or e.start >= kept[-1].end + self.min_gap_s:
+                    kept.append(e)
+            out = kept
+        return out
 
 
 @dataclass(frozen=True)

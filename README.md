@@ -6,15 +6,24 @@ ADRIFT can be tested against a sky whose content is known exactly.
 
 The implementation plan (`samples/plan.md`) and the per-milestone `checkpoint.md` are kept locally, not in git.
 
-Status: M6 (satellite signals). Scenarios resolve to a self-contained document, the truth (frequencies, Doppler,
-geometry, levels, events) can be computed, and the station's uint8 IQ stream is rendered with profile-shaped noise.
-Signals: `cw` (zombies), METEOR LRPT (`oqpsk`, 72 ksym/s with CADU framing), ORBCOMM subscriber downlinks (`sdpsk`,
-4800 sym/s) and gateway bursts (`oqpsk_burst`), and LoRa bursts (`lora`, SpaceBEE-style); presets `meteor_lrpt`,
-`orbcomm`, `spacebee`, `zombie`. Payloads are random, so the signals are realistic at the spectrum and symbol level
-but not decodable. The stream is served over rtl_tcp in real time, or written as SDR++-style WAV or raw cu8 files.
-The DSP runs in C++ kernels (pocketfft): 20 carriers plus noise render at ~8x real time on one core, METEOR,
-ORBCOMM and LoRa together at ~5.8x, and files render in parallel worker processes (20-29x on 6 cores, the same bytes
-for any number of workers).
+Status: M7 (terrestrial environment; M7 and M8 swapped, front-end realism is M8). Scenarios resolve to a
+self-contained document, the truth (frequencies, Doppler, geometry, levels, events) can be computed, and the station's
+uint8 IQ stream is rendered with profile-shaped noise.
+- Satellite signals: `cw` (zombies), METEOR LRPT (`oqpsk`, 72 ksym/s with CADU framing), ORBCOMM subscriber downlinks
+  (`sdpsk`, 4800 sym/s) and gateway bursts (`oqpsk_burst`), and LoRa bursts (`lora`, SpaceBEE-style); presets
+  `meteor_lrpt`, `orbcomm`, `spacebee`, `zombie`.
+- Terrestrial signals (ground and local sources, no geometry): VDL bursts (`d8psk`, VDL Mode 2 on 136.975 MHz;
+  `gfsk`, VDL Mode 4 style on 136.925 MHz), airband AM voice (`am`, cheap synthetic speech), the 138.1104 MHz
+  carrier, USB noise humps (`noise_comb`) and birdies (`cw`, `noise_band`); presets `vdl_ground`, `vdl_aircraft`
+  (each burst its own frequency offset and level), `atc_am`, `carrier_138`, `usb_humps`, `birdies`.
+  `bands/vhf137/terrestrial_default.yaml` puts this station's environment (levels, rates, burst lengths measured
+  from the recording and the waterfall days) into any scenario.
+
+Payloads are random, so the signals are realistic at the spectrum and symbol level but not decodable. The stream is
+served over rtl_tcp in real time, or written as SDR++-style WAV or raw cu8 files. The DSP runs in C++ kernels
+(pocketfft): 20 carriers plus noise render at ~8x real time on one core, the recording's hour with its terrestrial
+environment at ~9x, and files render in parallel worker processes (20-29x on 6 cores, the same bytes for any number
+of workers).
 
 ## Usage
 
@@ -29,14 +38,21 @@ uv run assist render   scenarios/zombie_single.yaml -o out/raw --format cu8 --fr
 uv run assist bench    scenarios/bench_cw20.yaml [--duration 5min] # speed on 1 worker and on all CPUs, no files
 uv run assist serve    scenarios/serve_demo.yaml                 # rtl_tcp on 127.0.0.1:1234, live, until Ctrl-C
 uv run assist serve    scenarios/serve_satellites.yaml           # METEOR, ORBCOMM (+ gateway) and LoRa, live
+uv run assist serve    scenarios/serve_terrestrial.yaml          # VDL, airband AM, 138 MHz carrier, humps, live
+uv run assist serve    scenarios/terrestrial_hour.yaml           # the recording's hour (past date), paced
+uv run assist truth    scenarios/terrestrial_hour.yaml -o out/truth.csv --to +10min --platforms ground
 uv run assist schema                                          # JSON Schema of a scenario
 uv run assist elements fetch                                  # network: dated retlector.eu snapshots
 uv run assist profile  build | labels | report                # data survey of samples/ (M1)
+uv run assist profile  terrestrial [--band]                   # VDL/AM/138 levels (M7) -> terrestrial_default.yaml
 ```
 
 Scenarios are YAML or JSON (`--set path=value` overrides a field, e.g. `sources[z1].freq_hz=137.35e6`). Named
 channels from `bands/vhf137/band.yaml` (ORBCOMM `S-1` .. `S-12`, `orbcomm_gateway`) can be used in a source's
-`channels` list, e.g. `channels: [S-5, S-8]` on an `orbcomm` source.
+`channels` list, e.g. `channels: [S-5, S-8]` on an `orbcomm` source. Add the station's terrestrial environment with
+`include: [bands/vhf137/terrestrial_default.yaml]` (with `profile: profiles/vhf137`); override any of its sources by
+id, e.g. `sources: [{id: usb-humps, comb: {enabled: false}}]`. Ground and local sources take a received level
+(`level: {cn0_dbhz: ...}`) instead of an orbit; `per_event` draws a frequency offset and level for every event.
 Renders are byte-identical for the same scenario (on the same backend), whatever the number of workers, and any
 window equals the same slice of a longer render. WAV files
 are named like SDR++ recordings (`baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav`, station local time); `--rf64` writes
@@ -74,4 +90,5 @@ uv run pytest
   a plain `uv sync --reinstall-package assist` switches back.
 
 Large local data (recordings, waterfalls, element snapshots) lives in `samples/`, which is gitignored; CI tests
-never need it (`tests/test_m6_local.py` and `tests/test_render_local.py` run only where it, or a render, exists). Tool outputs go to `out/`, one-off temporary files to `temp/` (both gitignored).
+never need it (`tests/test_m6_local.py`, `tests/test_m7_local.py` and `tests/test_render_local.py` run only where it,
+or a render, exists). Tool outputs go to `out/`, one-off temporary files to `temp/` (both gitignored).

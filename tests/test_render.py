@@ -295,9 +295,9 @@ def test_ppm_must_be_zero(tmp: Path) -> None:
 
 def test_unimplemented_signal_kinds_are_refused(tmp: Path) -> None:
     src = _cw("o1", 137.9e6)
-    src["emitters"][0]["signal"] = {"kind": "noise_band"}
-    with pytest.raises(NotImplementedError, match="M8"):
-        Renderer(_scene(tmp, [src], "noise_band"))
+    src["emitters"][0]["signal"] = {"kind": "bank_clip"}
+    with pytest.raises(NotImplementedError, match="later"):
+        Renderer(_scene(tmp, [src], "bank_clip"))
 
 
 def test_cpp_and_numpy_engines_agree(zombie: Scene) -> None:
