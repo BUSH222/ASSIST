@@ -171,6 +171,7 @@ class Scene:
                         None if lv is None else lv.rx_dbm,
                         0.0 if e.per_event is None else e.per_event.max_offset_hz,
                         e.per_event is not None,
+                        0.0 if src.platform != "satellite" else st.fade_s,
                     )
                 )
             self.sources.append(ss)

@@ -188,6 +188,7 @@ def test_orbcomm_fm117_through_the_m1_p2b_analysis(tmp_path: Path) -> None:
         "seed": 3,
         "clock": {"start": "2026-11-01T17:02:25Z", "duration": f"{dur + 2}s"},
         "profile": "profiles/vhf137",
+        "station": {"fade_s": 0},  # the level chain, not the fades: the recorded segment starts at AOS
         "elements": {"files": [str(p) for p in ELEMENTS]},
         "sources": [
             {

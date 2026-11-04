@@ -69,6 +69,22 @@ PASS_PAD_S = 0.002  # control samples this close outside a pass use that pass's 
 EVENT_PAD_S = 0.01  # per-event rendering: events this close outside a window are checked (filter tails, ramps)
 
 
+def fade(t: np.ndarray, passes: list[tuple[float, float]], fade_s: float) -> np.ndarray:
+    """Visibility as an amplitude gain: 0 outside the passes; inside, a raised-cosine rise from 0 to 1 over the
+    `fade_s` seconds after each pass's AOS and the mirror fall over the `fade_s` seconds before its LOS (plan §6.2: a
+    fade from and to pure noise instead of a horizon map). A pass shorter than 2 `fade_s` peaks below 1. A pure
+    function of t and the pass, so every window gives the same values."""
+    g = np.zeros(t.shape)
+    for a, z in passes:
+        sel = (t >= a) & (t < z)
+        if fade_s > 0:
+            x = np.minimum(np.minimum(t[sel] - a, z - t[sel]) / fade_s, 1.0)
+            g[sel] = 0.5 - 0.5 * np.cos(np.pi * x)
+        else:
+            g[sel] = 1.0
+    return g
+
+
 class RenderError(RuntimeError):
     pass
 
@@ -331,14 +347,12 @@ class EmitterRender:
         grid = np.arange(len(ctl.amp), dtype=np.float64)
         amp = np.interp(pos, grid, ctl.amp)
         cyc = np.interp(pos, grid, ctl.cyc)
-        vis = np.zeros(t.shape, dtype=bool)
-        for a, z in ctl.visible:
-            vis |= (t >= a) & (t < z)
+        vis = fade(t, ctl.visible, self.em.fade_s)
         if self.per_event:
-            env = vis.astype(np.float64)
+            env = vis
             x = self._events_x(n0, k, float(t[0]), float(t[-1]))
         elif self.signal.mode == "event":
-            env = vis.astype(np.float64)
+            env = vis
             x = self.signal.render_events(self.events(float(t[0]), float(t[-1]) + 1e-3), n0, k, self.rate)
         else:
             env = self.em.schedule.envelope(t) * vis

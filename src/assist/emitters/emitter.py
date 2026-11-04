@@ -80,6 +80,7 @@ class Emitter:
     rx_dbm: float | None = None  # fixed platforms: received level (None: wideband, relative to the noise)
     max_event_offset_hz: float = 0.0  # largest |per-event frequency offset|
     per_event: bool = False  # events carry offset_hz / level_db draws
+    fade_s: float = 0.0  # satellites: amplitude rises from 0 over this long after AOS and falls to 0 before LOS
 
     @property
     def is_event(self) -> bool:

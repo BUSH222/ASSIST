@@ -182,6 +182,50 @@ def test_levels_from_iq(levels: Scene) -> None:
     assert np.max(np.abs(diffs)) <= 0.3, diffs
 
 
+def test_fades_after_aos_and_before_los(cw: Scene, tmp: Path) -> None:
+    """A satellite carrier rises from nothing to its link level over 15 s after AOS and falls back over 15 s before
+    LOS (raised-cosine amplitude), the same in every window; a pass shorter than 2 fade_s never reaches full level;
+    fade_s = 0 gives the full level at once."""
+    p = _pass(cw, "c1")
+    em = cw.source("c1").emitters[0]
+    assert em.fade_s == 15.0
+    rd = Renderer(cw, noise=False)
+
+    def gain2(t0: float, scene: Scene = cw, rd: Renderer = rd) -> float:
+        n0 = sample_at(t0, FS)
+        y = rd.counts(n0, FS // 20)
+        t = (n0 + FS // 40) / FS
+        rx = float(scene.source("c1").emitters[0].truth(np.array([t]), 1e-3).rx_dbm[0])
+        return float(np.mean(np.abs(y) ** 2)) / math.pow(10.0, rx / 10)
+
+    def want(x: float) -> float:
+        return (0.5 - 0.5 * math.cos(math.pi * x)) ** 2
+
+    ref = gain2(p.aos + 40.0)
+    for dt in (3.0, 7.5, 12.0):
+        assert gain2(p.aos + dt) / ref == pytest.approx(want(dt / 15.0), rel=0.05)
+        assert gain2(p.los - 0.05 - dt) / ref == pytest.approx(want(dt / 15.0), rel=0.05)
+    assert gain2(p.aos + 15.5) / ref == pytest.approx(1.0, rel=0.02)
+    assert gain2(p.los - 15.6) / ref == pytest.approx(1.0, rel=0.02)
+    assert gain2(p.aos + 0.2) / ref < 1e-3
+    assert gain2(p.los - 0.3) / ref < 1e-3
+    again = Renderer(Scene(cw.scenario), noise=False)
+    assert gain2(p.aos + 7.5, cw, again) == gain2(p.aos + 7.5)
+    assert gain2(p.los - 7.5, cw, again) == gain2(p.los - 7.5)
+
+    # Fade longer than half the pass: the carrier peaks below full level, at x = (pass length / 2) / fade_s.
+    d = p.los - p.aos
+    long = _scene(tmp, [_cw("c1", 137.35e6)], "longfade", station={**STATION, "fade_s": d})
+    mid = p.aos + d / 2
+    assert gain2(mid, long, Renderer(long, noise=False)) / gain2(mid) == pytest.approx(want(0.5), rel=0.05)
+
+    off = _scene(tmp, [_cw("c1", 137.35e6)], "nofade", station={**STATION, "fade_s": 0})
+    assert off.source("c1").emitters[0].fade_s == 0.0
+    roff = Renderer(off, noise=False)
+    assert gain2(p.aos + 0.5, off, roff) / ref == pytest.approx(1.0, rel=0.05)
+    assert gain2(p.los - 0.6, off, roff) / ref == pytest.approx(1.0, rel=0.05)
+
+
 def test_render_window_independence(zombie: Scene, tmp: Path) -> None:
     """T-WIN and T-DET: a window rendered on its own equals the slice of a longer render, byte for byte.
 

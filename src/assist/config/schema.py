@@ -55,6 +55,13 @@ class StationConfig(_M):
     lon: float = FALLBACK_LON_DEG
     alt_m: float = FALLBACK_ALT_M
     horizon_deg: float = 0.0
+    fade_s: float = Field(
+        15.0,
+        ge=0,
+        description="Satellite signals rise from pure noise to their link-budget level over this long after AOS and "
+        "fall back to noise over this long before LOS (raised-cosine amplitude); there is no horizon map. A pass "
+        "shorter than twice this never reaches full level. 0 switches it off.",
+    )
     tz: str = Field(DEFAULT_TZ, description="Station local time zone, used only for SDR++-style file names.")
     source: str | None = Field(None, description="Set by resolve: where the position came from.")
 
