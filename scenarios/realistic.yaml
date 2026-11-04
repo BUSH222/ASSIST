@@ -25,6 +25,8 @@ seed: 21
 clock: {start: "2026-11-03T09:32:24Z", duration: 20min}
 sinks:
   - rtl_tcp: {port: 1234}
+  - fft: {width: 16384, row_seconds: 1, duration: 1h}
+
 profile: profiles/vhf137
 elements:
   files: [samples/active.csv, samples/satnogs.csv]

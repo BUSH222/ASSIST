@@ -340,6 +340,102 @@ def render(
 
 
 @app.command()
+def fft(
+    scenario: ScenarioArg,
+    out: Annotated[Path, typer.Option("-o", "--out", help="Output directory (PNG + run.json).")] = Path("out/fft"),
+    t_from: FromOpt = None,
+    duration: Annotated[
+        str | None,
+        typer.Option(help="Stream to plot, e.g. 90s, 1h (default: the fft sink's `duration`; one is required)."),
+    ] = None,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing PNG.")] = False,
+    workers: WorkersOpt = None,
+    set_: SetOpt = None,
+) -> None:
+    """Waterfall PNG of the stream, from the scenario's `fft` sink (width, row_seconds, duration, min_db, max_db)."""
+    import time
+
+    from assist.engine import workers as pool
+    from assist.engine.control import RenderError
+    from assist.engine.render import Renderer
+    from assist.engine.scene import Scene
+    from assist.sinks import runinfo
+    from assist.sinks.fft import FftSpec, WaterfallSink, waterfall_name
+    from assist.sinks.wavfile import OutFile
+    from assist.timebase import format_iso, parse_iso, parse_time, sample_at
+
+    nw = _workers(workers)
+    r = _resolve(scenario, set_)
+    sc = r.scenario
+    cfg = next((s["fft"] or {} for s in sc.sinks if "fft" in s), None)
+    if cfg is None:
+        typer.echo("error: the scenario has no `fft` entry in `sinks:`", err=True)
+        raise typer.Exit(2)
+    try:
+        spec = FftSpec.from_dict(cfg, duration)
+        rd = Renderer(Scene(sc))
+        sink = WaterfallSink(spec, rd.fs)
+    except (RenderError, ValueError, NotImplementedError) as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from e
+    t0 = parse_iso(sc.clock.start)
+    a = parse_time(t_from, t0) if t_from else t0
+    n0, n = sample_at(a, rd.fs), sink.n_samples
+    png = out / waterfall_name(rd.fc_hz, n0 / rd.fs, sc.station.tz)
+    run_path = out / "run.json"
+    existing = [p for p in (png, run_path) if p.exists()]
+    if existing and not force:
+        typer.echo(f"error: {existing[0]} exists (use --force to overwrite)", err=True)
+        raise typer.Exit(1)
+    files = [OutFile(png, 0, n, n0)]
+    nw = min(nw, len(pool.tasks(n0, n, rd.fs)))
+    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, "fft", n0, n, files, "rendering", workers=nw))
+    typer.echo(
+        f"plotting {n / rd.fs:.1f} s from {format_iso(n0 / rd.fs, 3)}: {sink.width} x {sink.height} px, "
+        f"{sink.row_samples / rd.fs:.3f} s per row ({nw} worker{'s' if nw > 1 else ''})",
+        err=True,
+    )
+    tic = time.perf_counter()
+    stream = pool.iter_u8(r.canonical, Path.cwd(), n0, n, rd.fs, nw) if nw > 1 else rd.iter_u8(n0, n)
+    status, code = "complete", 0
+    try:
+        for chunk in stream:
+            sink.write(chunk)
+        sink.close()
+    except KeyboardInterrupt:
+        status = "stopped"
+    except RenderError as e:
+        status, code = "error", 2
+        typer.echo(f"error: {e}", err=True)
+    elapsed = time.perf_counter() - tic
+    if sink.rows:
+        sink.save(png)
+    info = runinfo.run_info(
+        r,
+        rd,
+        "fft",
+        n0,
+        n,
+        files if sink.rows else [],
+        status,
+        workers=nw,
+        render_seconds=round(elapsed, 3),
+        fft=sink.info(),
+    )
+    runinfo.write_run_json(run_path, info)
+    if sink.rows:
+        typer.echo(str(png))
+    if sink.min_db is not None:
+        typer.echo(
+            f"{status}: {sink.rows}/{sink.height} rows, levels {sink.min_db:.1f}..{sink.max_db:.1f} dB", err=True
+        )
+    else:
+        typer.echo(f"{status}: {sink.rows}/{sink.height} rows (level not yet calibrated)", err=True)
+    if code:
+        raise typer.Exit(code)
+
+
+@app.command()
 def bench(
     scenario: ScenarioArg,
     t_from: FromOpt = None,
