@@ -1,4 +1,4 @@
-# Live rtl_tcp view of the M6 satellite signals (your SDR++ check). The clock starts `now` and the synthetic passes
+# Live rtl_tcp view of the satellite signals. The clock starts `now` and the synthetic passes
 # are placed around the launch, so everything is up within the first minutes:
 #   met       METEOR LRPT on 137.9 MHz: AOS -4 min, 70 deg (up until about +11 min)
 #   oc1, oc2  ORBCOMM: subscriber SDPSK on S-2 (137.2250) + S-7 (137.6875) and S-4 (137.4400) + S-9 (137.7375), and

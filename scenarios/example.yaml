@@ -1,6 +1,7 @@
-# Example scenario (M2: sky and truth only; IQ rendering arrives in M3).
-# Needs the local element snapshots in samples/. The station position comes from samples/station.yaml when present
-# (otherwise the rounded fallback 55.5 N, 37.1 E, 172 m).
+# Example scenario: real catalog orbits (both METEORs, TRANSIT 5B-5) next to a synthetic zombie pass, written out
+# with explicit emitters and with a preset.
+# The station position comes from samples/station.yaml when present (otherwise 55.5 N, 37.1 E, 172 m); add a
+# `station:` block to set it.
 #   uv run assist validate scenarios/example.yaml
 #   uv run assist passes   scenarios/example.yaml --to +6h
 #   uv run assist truth    scenarios/example.yaml -o out/truth.csv --to +2h
@@ -10,7 +11,7 @@ seed: 42
 clock: {start: now, duration: 2h}
 profile: profiles/vhf137
 elements:
-  files: [samples/active.csv, samples/satnogs.csv]
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
 
 sources:
   - id: m2-3

@@ -1,0 +1,86 @@
+# A tour of the configuration options: every schedule type, every platform kind and most signal kinds in a 10 minute
+# window, built from nothing but presets and explicit emitters. It needs no element files (all orbits are synthetic),
+# so it runs on a bare checkout.
+#
+#   platform: ground (fixed received level)      beacon-gaps, vdl-air, voice
+#   platform: local  (inside the receiver)       birdie-cw, birdie-wide, humps
+#   platform: satellite                          sat-lora (event signal, two channels), sat-lrpt (a preset), sat-cw
+#
+#   uv run assist validate scenarios/signal_tour.yaml
+#   uv run assist truth    scenarios/signal_tour.yaml -o out/tour/truth.csv    # also writes truth.events.csv
+#   uv run assist fft      scenarios/signal_tour.yaml                          # out/fft/waterfall_*.png (the fft sink below)
+#   uv run assist render   scenarios/signal_tour.yaml -o out/tour --format cu8
+#   uv run assist render   scenarios/signal_tour.yaml -o out/tour2 --format cu8 --set seed=2 --set 'sources[voice].voice.enabled=false'
+version: 1
+seed: 1
+clock: {start: "2026-11-04T12:00:00Z", duration: 10min}
+station: {lat: 55.5, lon: 37.1, alt_m: 172, horizon_deg: 5, fade_s: 10}   # no samples/station.yaml needed
+profile: profiles/vhf137
+frontend: {t_ant_k: 450}                                  # one field of the band's front end changed
+antenna: {pattern: {type: cardioid, n: 1.5, peak_dbi: 2}}   # instead of the QFH polynomial
+sinks:
+  - rtl_tcp: {port: 1234}
+  - fft: {width: 16384, row_seconds: 1, duration: 10min, min_db: 20, max_db: 55}
+
+sources:
+  # --- ground: a fixed received level; exp_gaps = bursts separated by min_gap_s + an exponential gap (a burst may not outlast min_gap_s) ---
+  - id: beacon-gaps
+    platform: ground
+    emitters:
+      - id: cw
+        signal: {kind: cw}
+        freq_hz: 136.4e6
+        schedule: {type: exp_gaps, mean_gap_s: 40, min_gap_s: 20, duration: {dist: exponential, mean_s: 6, max_s: 20}, ramp_ms: 5}
+        level: {cn0_dbhz: 48, extra_loss_db: 3}          # 3 dB of extra path loss on top of 48 dB-Hz
+
+  # --- ground: a preset (VDL Mode 2), burst rate and level changed; every burst its own offset and level ---
+  - id: vdl-air
+    preset: vdl_aircraft
+    freq_hz: 136.975e6
+    schedule: {rate_per_hour: 900}
+    level: {cn0_dbhz: 62}
+
+  # --- ground: airband AM voice, a list of 24 hourly rates (this window is in UTC hour 12), a fixed offset ---
+  - id: voice
+    preset: atc_am
+    freq_hz: 136.2e6
+    offset_hz: 120
+    schedule:
+      rate_per_hour: [0, 0, 0, 0, 0, 0, 6, 12, 18, 24, 30, 36, 60, 36, 30, 24, 18, 12, 6, 0, 0, 0, 0, 0]
+      duration: {dist: lognormal, median_s: 4, sigma: 0.6, max_s: 30}
+    level: {rx_dbm: -105}                                  # an absolute level instead of a C/N0
+
+  # --- local: receiver spurs. A tone, and a wide one (Gaussian, 2 kHz FWHM) ---
+  - id: birdie-cw
+    preset: birdies
+    emitters:
+      - {id: tone, signal: {kind: cw}, freq_hz: 137.1355e6, level: {cn0_dbhz: 21}}
+      - {id: wide, signal: {kind: noise_band, params: {width_hz: 2000}}, freq_hz: 136.0502e6, level: {cn0_dbhz: 32}}
+
+  # --- local, wideband: USB noise humps over the whole band; spacing and ripple from the signal parameters ---
+  - id: humps
+    preset: usb_humps
+    schedule: {rate_per_hour: 12, duration: {dist: lognormal, median_s: 60, sigma: 0.5, max_s: 200}}
+    signal: {params: {spacing_hz: [80000, 145000], amplitude_db: [0.15, 0.3], wander_hz_s: 1500}}
+
+  # --- satellite: SpaceBEE-style LoRa on one of two channels per burst, bursts every ~1 min on average ---
+  - id: sat-lora
+    preset: spacebee
+    orbit: {synthetic_pass: {aos: -2min, max_el_deg: 70, direction: asc, side: east, alt_km: 470, inc_deg: 97.3}}
+    schedule: {mean_gap_s: 60, min_gap_s: 15}
+    signal: {params: {sf: [8, 10], payload_bytes: [20, 40]}}
+
+  # --- satellite: METEOR LRPT preset on a synthetic pass; the level is C/N0 of an overhead pass instead of cal ---
+  - id: sat-lrpt
+    preset: meteor_lrpt
+    orbit: {synthetic_pass: {aos: +1min, max_el_deg: 40, direction: desc, side: west}}
+    level: {cn0_zenith_dbhz: 52}
+
+  # --- satellite: a zombie with a random frequency (drawn once from the seed), tumbling AM and an on/off keying ---
+  - id: sat-cw
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -1min, max_el_deg: 25, direction: desc, side: east}}
+    freq_hz: "uniform(136.5e6, 136.8e6)"
+    oscillator: {pass_offset_sigma_hz: 100, drift_hz_s: 0.5}
+    schedule: {on_s: 30, off_s: 20, ramp_ms: 10}
+    am: {period_s: 4, depth_db: 8}

@@ -1,4 +1,4 @@
-# Mixed-band scenario (requested 2026-11-05): a low METEOR-M2 4 pass with SpaceBEE-style LoRa landing on top of it,
+# Mixed-band scenario: a low METEOR-M2 4 pass with SpaceBEE-style LoRa landing on top of it,
 # next to ORBCOMM without its gateway (no OQPSK), a zombie keyed 60 s on / 10 s off with a steady (unmodulated)
 # amplitude, VDL, occasional airband voice on 136.2 MHz, the receiver's birdies and USB noise humps. No 138 MHz
 # carrier.
@@ -14,7 +14,6 @@
 #             during the pass: STARLINK-36816 (67891, 68 deg) and STARLINK-36884 (68026, 19.7 deg)
 #   oc1       ORBCOMM subscriber SDPSK on S-5 + S-8 only (gateway off), synthetic pass
 #   z1        zombie CW at 136.35 MHz, 60 s on / 10 s off, no AM (the carrier's level only follows the pass)
-# Needs the element snapshots in samples/ (local only).
 #
 # From the repository root:
 #   uv run assist passes scenarios/realistic.yaml
@@ -29,7 +28,7 @@ sinks:
 
 profile: profiles/vhf137
 elements:
-  files: [samples/active.csv, samples/satnogs.csv]
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
 sources:
   - id: atc
     preset: atc_am

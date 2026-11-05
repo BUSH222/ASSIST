@@ -1,4 +1,4 @@
-# Live rtl_tcp demo (M4): the 1 h SDR++ streaming check. The clock starts `now`, so the stream is live (sample time =
+# Live rtl_tcp demo: three zombie carriers around the launch time. The clock starts `now`, so the stream is live (sample time =
 # wall time) and the passes are placed relative to the launch:
 #   c1  continuous carrier at 136.40 MHz, already up at launch (AOS -5 min, 70 deg), no AM;
 #   z1  keyed zombie at 137.35 MHz (zombie preset: 40 s on / 180 s off, AM 7.5 s / 6 dB), AOS +5 min, 45 deg;
