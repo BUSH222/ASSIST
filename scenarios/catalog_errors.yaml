@@ -1,0 +1,53 @@
+# Orbit types and what the tracking software is told about them (`assist catalog` writes the element sets it gets).
+# Every source is a zombie carrier; what differs is the relation between the true orbit and the catalog:
+#   known           a real object, true orbit = its published element set (the baseline)
+#   late            a real object whose true orbit is the published one with the satellite 40 s behind and the node
+#                   0.05 deg off (`perturb`): the catalog is slightly wrong, as with real element sets
+#   unlisted        a real object removed from the catalog output (`in_catalog: false`): a satellite the catalog does
+#                   not know, with the real object's orbit
+#   fake-listed     a synthetic pass that appears in the catalog under NORAD 99001 (`in_catalog: true`)
+#   fake-unlisted   a synthetic pass that is not in the catalog (the default for synthetic orbits)
+#   kepler          a circular orbit given by Kepler elements, not in the catalog
+#
+#   uv run assist passes  scenarios/catalog_errors.yaml                    # when each one is up
+#   uv run assist catalog scenarios/catalog_errors.yaml -o out/catalog.tle   # the whole store minus `unlisted`, plus 99001
+#   uv run assist catalog scenarios/catalog_errors.yaml -o out/sources.tle --sources-only
+#   uv run assist truth   scenarios/catalog_errors.yaml -o out/catalog_errors/truth.csv --step 10s
+#   uv run assist render  scenarios/catalog_errors.yaml -o out/catalog_errors --format cu8 --duration 20min
+version: 1
+seed: 9
+clock: {start: "2026-11-03T00:00:00Z", duration: 6h}
+profile: profiles/vhf137
+elements:
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+sources:
+  - id: known
+    preset: zombie
+    orbit: {norad: 1804}               # ALOUETTE 2
+    freq_hz: 136.8031e6
+  - id: late
+    preset: zombie
+    orbit:
+      norad: 965                       # OPS 6582 (TRANSIT 5B-5)
+      perturb: {along_track_s: 40, raan_deg: 0.05}
+    freq_hz: 136.5872e6
+  - id: unlisted
+    preset: zombie
+    orbit: {norad: 4256}               # OPS 7613 (P/L 1)
+    in_catalog: false
+    freq_hz: 136.4118e6
+  - id: fake-listed
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +20min, max_el_deg: 55, direction: asc, side: east}}
+    in_catalog: true
+    catalog_norad: 99001
+    freq_hz: 136.2750e6
+  - id: fake-unlisted
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +45min, max_el_deg: 30, direction: desc, side: west}}
+    freq_hz: "uniform(136.1e6, 136.2e6)"      # drawn once from the seed
+  - id: kepler
+    preset: zombie
+    orbit:
+      kepler: {epoch: "2026-11-03T00:00:00Z", alt_km: 780, i_deg: 82.5, raan_deg: 40, m_deg: 90}
+    freq_hz: 136.9000e6

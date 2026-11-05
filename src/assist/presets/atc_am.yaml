@@ -1,0 +1,16 @@
+# Airband AM voice on one channel (plan §6.5, M7): push-to-talk transmissions (DSB with full carrier, cheap synthetic
+# speech, 20 ms PTT ramps), Poisson-timed, lognormal durations; each transmission its own small carrier offset and
+# level (controller and aircraft alike). The level is the carrier's. Give `freq_hz`, the level and the rate.
+platform: ground
+emitters:
+  - id: voice
+    signal: {kind: am}
+    freq_hz: 136.2e6
+    schedule:
+      type: poisson_events
+      rate_per_hour: 10
+      duration: {dist: lognormal, median_s: 3.0, sigma: 0.74, max_s: 60}
+    level: {cn0_dbhz: 35}
+    per_event:
+      offset_hz: [-500, 500]
+      level_db: {dist: normal, sigma_db: 5, min_db: -10, max_db: 15}

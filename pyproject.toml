@@ -1,19 +1,65 @@
+[build-system]
+requires = ["scikit-build-core>=1.1", "pybind11>=3.1"]
+build-backend = "scikit_build_core.build"
+
 [project]
-name = "template"
+name = "assist"
 version = "0.1.0"
-description = "Add your description here"
-requires-python = ">=3.14"
-dependencies = []
+description = "ASSIST (Autonomous Satellite Signal Imitator Station): synthetic RTL-SDR IQ at 137 MHz for testing ADRIFT"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.15"
+dependencies = [
+    "numpy>=2.5.4",
+    "pillow>=13.0.0",
+    "pydantic>=2.14.2",
+    "pyyaml>=6.0.3",
+    "scipy>=1.18.1",
+    "sgp4>=2.27",
+    "skyfield>=1.55",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+assist = "assist.cli:app"
+
+[project.optional-dependencies]
+profile = [
+    "matplotlib>=3.11.2",
+]
 
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.2",
+    "pybind11>=3.1.0",
+    "pytest>=9.2.0",
+    "pytest-benchmark>=5.3.1",
     "ruff>=0.16.5",
+    "scikit-build-core>=1.1.1",
     "ty>=0.0.78",
 ]
 
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+# A fixed build dir lets editable installs rebuild the C++ module on import (dev loop, plan §2).
+build-dir = "build/{wheel_tag}"
+editable.rebuild = true
+editable.verbose = false
+wheel.packages = ["src/assist"]
+
+[tool.scikit-build.cmake.define]
+# `ASSIST_NATIVE=ON uv sync --reinstall-package assist` adds -march=native (local builds only).
+# Passed on every build, so the CMake cache never keeps a stale value.
+ASSIST_NATIVE = { env = "ASSIST_NATIVE", default = "OFF" }
+
+[tool.uv]
+# Build assist in the project venv, so the editable install can re-run CMake on import.
+no-build-isolation-package = ["assist"]
+
 
 [tool.ruff]
+# Ruff 0.16 still marks the py315 target as unstable (warning on every run); the code needs no 3.15-only syntax.
 target-version = "py314"
 line-length = 119
 exclude = [
@@ -24,6 +70,7 @@ exclude = [
     ".pytest_cache",
     "build",
     "dist",
+    "samples",  # local data + the plan, whose code blocks are pseudo-code (ruff also formats Markdown)
 ]
 
 [tool.ruff.lint]
@@ -53,11 +100,10 @@ python_files = "test_*.py"
 python_functions = "test_*"
 
 [tool.ty.environment]
-python-version = "3.14"
+python-version = "3.15"
 
 [tool.ty.terminal]
 error-on-warning = false
 
 [tool.ty.rules]
 all = "warn"
-

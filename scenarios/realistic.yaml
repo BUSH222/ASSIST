@@ -1,0 +1,98 @@
+# Mixed-band scenario: a low METEOR-M2 4 pass with SpaceBEE-style LoRa landing on top of it,
+# next to ORBCOMM without its gateway (no OQPSK), a zombie keyed 60 s on / 10 s off with a steady (unmodulated)
+# amplitude, VDL, occasional airband voice on 136.2 MHz, the receiver's birdies and USB noise humps. No 138 MHz
+# carrier.
+# The clock starts at METEOR-M2 4's AOS (09:32:24 UTC), so the satellites, the zombie and the ORBCOMM pass are up at
+# t+0 (the zombie's first on interval starts exactly there: phase_s is the Unix start time mod 70 s). Event signals
+# (VDL, AM, LoRa, humps) are random Poisson/exp_gaps draws: the YAML cannot pin an event to a start time, so the
+# humps are NOT forced to t+30 s (see the note on usb-humps).
+#   noise     profiles/vhf137 (spectral shape, 26.7 counts)
+#   atc       AM voice on 136.200 MHz, about 15 transmissions an hour (the recording's rate there is ~8-26)
+#   vdl-*     VDL Mode 2 (D8PSK, 136.975 MHz): a fixed-level ground station and aircraft bursts (own offset and level)
+#   m2-4      METEOR-M2 4 LRPT on 137.9 MHz, real catalog orbit: AOS 09:32:24, 19.6 deg max elevation (a low pass)
+#   sl-*      LoRa on 137.9265 MHz (overlaps METEOR's 137.9 MHz band) from two Starlinks standing in for SpaceBEEs, up
+#             during the pass: STARLINK-36816 (67891, 68 deg) and STARLINK-36884 (68026, 19.7 deg)
+#   oc1       ORBCOMM subscriber SDPSK on S-5 + S-8 only (gateway off), synthetic pass
+#   z1        zombie CW at 136.35 MHz, 60 s on / 10 s off, no AM (the carrier's level only follows the pass)
+#
+# From the repository root:
+#   uv run assist passes scenarios/realistic.yaml
+#   uv run assist truth  scenarios/realistic.yaml -o out/realistic/truth.csv
+#   uv run assist render scenarios/realistic.yaml -o out/realistic --format cu8     # 20 min = 5.8 GB
+version: 1
+seed: 21
+clock: {start: "2026-11-03T09:32:24Z", duration: 20min}
+sinks:
+  - rtl_tcp: {port: 1234}
+  - fft: {width: 16384, row_seconds: 1, duration: 1h}
+
+profile: profiles/vhf137
+elements:
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+sources:
+  - id: atc
+    preset: atc_am
+    freq_hz: 136.2e6
+    schedule: {rate_per_hour: 15}
+    level: {cn0_dbhz: 35}
+  - id: vdl-ground
+    preset: vdl_ground
+    freq_hz: 136.975e6
+    level: {cn0_dbhz: 70}
+    schedule: {rate_per_hour: 600}
+  - id: vdl-air
+    preset: vdl_aircraft
+    freq_hz: 136.975e6
+    schedule: {rate_per_hour: 1200}
+  - id: m2-4
+    preset: meteor_lrpt
+    orbit: {norad: 59051}
+  - id: sl-67891
+    preset: spacebee
+    orbit: {norad: 67891}
+    freq_hz: 137.9265e6
+  - id: sl-68026
+    preset: spacebee
+    orbit: {norad: 68026}
+    freq_hz: 137.9265e6
+  - id: oc1
+    preset: orbcomm
+    orbit: {synthetic_pass: {aos: +0s, max_el_deg: 50, direction: asc, side: west, alt_km: 750, inc_deg: 70}}
+    channels: [S-5, S-8]
+    gateway: {enabled: false}
+  - id: z1
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +0s, max_el_deg: 45, direction: desc, side: east}}
+    freq_hz: 136.35e6
+    schedule: {on_s: 60, off_s: 10, phase_s: 4.0}   # 1793698344 (the clock start) mod 70
+    am: null
+  # USB humps: episodes at 2/h, random start (Poisson). The YAML cannot place one at t+30 s; see the note above.
+  - id: usb-humps
+    preset: usb_humps
+    schedule:
+      rate_per_hour: 2.028
+      duration: {median_s: 59.8, sigma: 0.863}
+    signal:
+      params:
+        spacing_hz: [145019.5, 80941.1]
+        amplitude_db: [0.108, 0.29]
+        wander_hz_s: 1538.4
+  # Birdies: the 15 lines of bands/vhf137/terrestrial_default.yaml (steady from t+0).
+  - id: birdies
+    preset: birdies
+    emitters:
+      - {id: b01, signal: {kind: noise_band, params: {width_hz: 2197.3}}, freq_hz: 136050195.312, level: {cn0_dbhz: 31.88}}
+      - {id: b02, signal: {kind: cw}, freq_hz: 136463720.703, level: {cn0_dbhz: 18.12}}
+      - {id: b03, signal: {kind: cw}, freq_hz: 136646972.656, level: {cn0_dbhz: 17.59}}
+      - {id: b04, signal: {kind: cw}, freq_hz: 136708056.641, level: {cn0_dbhz: 18.03}}
+      - {id: b05, signal: {kind: cw}, freq_hz: 136891162.109, level: {cn0_dbhz: 21.21}}
+      - {id: b06, signal: {kind: cw}, freq_hz: 136952246.094, level: {cn0_dbhz: 20.34}}
+      - {id: b07, signal: {kind: cw}, freq_hz: 137135498.047, level: {cn0_dbhz: 20.92}}
+      - {id: b08, signal: {kind: cw}, freq_hz: 137196582.031, level: {cn0_dbhz: 21.71}}
+      - {id: b09, signal: {kind: cw}, freq_hz: 137486694.336, level: {cn0_dbhz: 20.14}}
+      - {id: b10, signal: {kind: cw}, freq_hz: 137501855.469, level: {cn0_dbhz: 19.4}}
+      - {id: b11, signal: {kind: cw}, freq_hz: 137503833.008, level: {cn0_dbhz: 22.28}}
+      - {id: b12, signal: {kind: cw}, freq_hz: 137628564.453, level: {cn0_dbhz: 25.1}}
+      - {id: b13, signal: {kind: cw}, freq_hz: 137685034.18, level: {cn0_dbhz: 18.75}}
+      - {id: b14, signal: {kind: cw}, freq_hz: 137746044.922, level: {cn0_dbhz: 22.8}}
+      - {id: b15, signal: {kind: cw}, freq_hz: 137807128.906, level: {cn0_dbhz: 22.94}}

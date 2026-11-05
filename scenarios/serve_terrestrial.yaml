@@ -1,0 +1,13 @@
+# Live rtl_tcp view of the terrestrial environment bands/vhf137/terrestrial_default.yaml with the clock at
+# `now`, so the hourly rates are those of the current UTC hour. No satellites.
+#
+# From the repository root:
+#   uv run assist serve scenarios/serve_terrestrial.yaml        # 127.0.0.1:1234 until Ctrl-C
+# SDR++: rtl_tcp source, host 127.0.0.1, port 1234, sample rate 2.4 MHz (the stream is fixed at 137.000 MHz).
+version: 1
+seed: 11
+clock: {start: now, duration: 1h}
+profile: profiles/vhf137
+include: [bands/vhf137/terrestrial_default.yaml]
+sinks:
+  - rtl_tcp: {port: 1234}

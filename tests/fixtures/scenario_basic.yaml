@@ -1,0 +1,36 @@
+# Test scenario: needs no local data (fixture elements, the plan's rounded station position).
+version: 1
+seed: 42
+clock: {start: "2026-11-01T16:39:00Z", duration: 100min}
+station: {file: null, lat: 55.5, lon: 37.1, alt_m: 172}
+elements:
+  files: [tests/fixtures/omm_2026-11-02.csv]
+sources:
+  - id: fm117
+    orbit: {norad: 41188}
+    emitters:
+      - id: stx-a
+        signal: {kind: sdpsk}
+        freq_hz: 137.4600e6
+        offset_hz: 402.0
+        level: {p_tx_dbw: 7.0}
+  - id: m2-3
+    orbit: {norad: 57166, perturb: {along_track_s: 2.0}}
+    emitters:
+      - id: lrpt
+        signal: {kind: oqpsk}
+        freq_hz: 137.9e6
+        level: {cal: meteor_m2_3}
+  - id: kep
+    orbit: {kepler: {epoch: "2026-11-01T16:00:00Z", alt_km: 550, i_deg: 97.6, raan_deg: 40, m_deg: 10}}
+    in_catalog: true
+    emitters:
+      - id: beacon
+        signal: {kind: cw}
+        freq_hz: "uniform(137.1e6, 137.2e6)"
+        schedule: {type: poisson_events, rate_per_hour: 120, duration: {dist: lognormal, median_s: 4, sigma: 0.74, max_s: 60}}
+        level: {cn0_zenith_dbhz: 50}
+  - id: z1
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +2min, max_el_deg: 45, direction: desc, side: east}}
+    freq_hz: "uniform(136.1e6, 137.9e6)"

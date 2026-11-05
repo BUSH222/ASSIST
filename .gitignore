@@ -1,6 +1,21 @@
 # Custom exceptions for this project
 # Add any project-specific ignores here
 
+# Large local data, the plan (samples/plan.md) and checkpoint.md stay local
+samples/*
+
+# Tool outputs (out/) and one-off temporary files (temp/), IQ/waterfall data
+out/
+temp/
+# Sample bank: local clips of the recordings (plan §9)
+profiles/*/bank/
+*.cu8
+*.wav
+*.raw
+
+checkpoint.md
+
+
 # OS generated files
 .DS_Store
 .DS_Store?

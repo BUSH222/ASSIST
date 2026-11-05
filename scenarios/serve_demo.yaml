@@ -1,0 +1,34 @@
+# Live rtl_tcp demo: three zombie carriers around the launch time. The clock starts `now`, so the stream is live (sample time =
+# wall time) and the passes are placed relative to the launch:
+#   c1  continuous carrier at 136.40 MHz, already up at launch (AOS -5 min, 70 deg), no AM;
+#   z1  keyed zombie at 137.35 MHz (zombie preset: 40 s on / 180 s off, AM 7.5 s / 6 dB), AOS +5 min, 45 deg;
+#   c2  continuous carrier at 137.70 MHz with the preset's AM, AOS +15 min, 30 deg.
+# All three overlap from +5 to ~+11 min (the heaviest render load); the second half hour is noise only.
+#
+# From the repository root:
+#   uv run assist serve scenarios/serve_demo.yaml                # 127.0.0.1:1234 until Ctrl-C (--duration 1h to stop)
+#   uv run assist passes scenarios/serve_demo.yaml               # pass times for this launch
+# SDR++: rtl_tcp source, host 127.0.0.1, port 1234, sample rate 2.4 MHz (the stream is fixed at 137.000 MHz).
+version: 1
+seed: 4
+clock: {start: now, duration: 1h}
+profile: profiles/vhf137
+sinks:
+  - rtl_tcp: {port: 1234}
+sources:
+  - id: c1
+    preset: zombie
+    orbit: {synthetic_pass: {aos: -5min, max_el_deg: 70, direction: desc, side: east}}
+    freq_hz: 136.40e6
+    schedule: {type: continuous}
+    am: null
+    level: {cn0_zenith_dbhz: 50}
+  - id: z1
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +5min, max_el_deg: 45, direction: asc, side: west}}
+    freq_hz: 137.35e6
+  - id: c2
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +15min, max_el_deg: 30, direction: desc, side: west}}
+    freq_hz: 137.70e6
+    schedule: {type: continuous}

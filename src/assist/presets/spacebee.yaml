@@ -1,0 +1,12 @@
+# SpaceBEE-style LoRa (plan §6.5): bursts of 125 kHz LoRa, SF 7..12 and 10..60 payload bytes drawn per burst, each on
+# one of two channels (137.099 or 137.9265 MHz, the latter overlapping METEOR on 137.9 MHz); gaps from exp_gaps
+# (min 20 s + exponential, mean 180 s, one chain per UTC hour). Level cn0_zenith_dbhz 50 is an assumption (your
+# choice for now, to be tuned). No SpaceBEE objects are in the element snapshots: put the preset on any orbit.
+platform: satellite
+emitters:
+  - id: lora
+    signal: {kind: lora}
+    freq_hz: [137.099e6, 137.9265e6]
+    schedule: {type: exp_gaps, mean_gap_s: 180, min_gap_s: 20}
+    level: {cn0_zenith_dbhz: 50}
+    pattern: qfh_poly

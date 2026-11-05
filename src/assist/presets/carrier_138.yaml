@@ -1,0 +1,16 @@
+# The 138.1104 MHz carrier (plan §6.5, M1): unmodulated bursts (one transmitter), Poisson-timed, lognormal durations,
+# 5 ms ramps; each burst its own offset (+-0.2 kHz) and level. Give the rate and the level.
+platform: ground
+emitters:
+  - id: carrier
+    signal: {kind: cw}
+    freq_hz: 138.1104e6
+    schedule:
+      type: poisson_events
+      rate_per_hour: 17
+      duration: {dist: lognormal, median_s: 4.0, sigma: 0.74, max_s: 300}
+      ramp_ms: 5
+    level: {cn0_dbhz: 35}
+    per_event:
+      offset_hz: [-200, 200]
+      level_db: {dist: normal, sigma_db: 5, min_db: -10, max_db: 15}

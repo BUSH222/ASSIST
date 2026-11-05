@@ -1,0 +1,21 @@
+# One synthetic-pass zombie on a quiet band.
+#
+# A zombie carrier at 137.35 MHz (zombie preset: 40 s on / 180 s off, AM 7.5 s / 6 dB, per-pass offset sigma 50 Hz,
+# drift 0.2 Hz/s with a random sign, C/N0 45 dB-Hz for an overhead pass) on a 45 deg pass starting one minute after
+# the clock start. Noise from the profile (shape and 26.7 counts). The station is samples/station.yaml when present,
+# else the rounded fallback; the pass is solved for whichever is used.
+#
+# From the repository root:
+#   uv run assist passes scenarios/zombie_single.yaml                           # AOS 12:01:00, LOS 12:16:10 UTC
+#   uv run assist truth  scenarios/zombie_single.yaml -o out/zombie/truth.csv
+#   uv run assist render scenarios/zombie_single.yaml -o out/zombie                 # 18 min, 2 WAV files, 5.2 GB
+#   uv run assist render scenarios/zombie_single.yaml -o out/zombie_cu8 --format cu8 # one raw file (SDR++ Better File Source)
+version: 1
+seed: 1
+clock: {start: "2026-11-04T12:00:00Z", duration: 18min}   # 1 min before AOS to ~2 min after LOS
+profile: profiles/vhf137
+sources:
+  - id: z1
+    preset: zombie
+    orbit: {synthetic_pass: {aos: +1min, max_el_deg: 45, direction: desc, side: east}}
+    freq_hz: 137.35e6

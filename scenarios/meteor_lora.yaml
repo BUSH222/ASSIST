@@ -1,0 +1,29 @@
+# METEOR-M2 3 and M2-4 LRPT on 137.9 MHz with LoRa on the overlapping channel, 137.9265 MHz.
+# Real catalog orbits, back to back: the M2-3 pass (AOS 09:01:23 UTC, 22 deg) then the M2-4 pass (AOS 09:32:24,
+# 20 deg). Real METEOR passes do not overlap on 3-5 Nov: M2-4 always follows M2-3 by about 30 min.
+# There are no SpaceBEEs in the element snapshots, so ten polar Starlinks (97.3 deg, ~466 km, one per orbital plane,
+# RAAN 0..324 deg in 36 deg steps) carry the spacebee preset's LoRa, here on the overlapping channel only.
+# STARLINK-4376 (53216) is up during the M2-3 pass (11.5 deg); STARLINK-36816 (67891, 68 deg) and STARLINK-36884
+# (68026) during the M2-4 pass.
+#   uv run assist passes scenarios/meteor_lora.yaml
+#   uv run assist truth  scenarios/meteor_lora.yaml -o out/meteor_lora/truth.csv
+#   uv run assist render scenarios/meteor_lora.yaml -o out/meteor_lora --format cu8       # 47 min = 13.5 GB
+version: 1
+seed: 6
+clock: {start: "2026-11-03T09:00:00Z", duration: 47min}
+profile: profiles/vhf137
+elements:
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+sources:
+  - {id: m2-3, preset: meteor_lrpt, orbit: {norad: 57166}}
+  - {id: m2-4, preset: meteor_lrpt, orbit: {norad: 59051}}
+  - {id: sl-53216, preset: spacebee, orbit: {norad: 53216}, freq_hz: 137.9265e6}   # STARLINK-4376, RAAN 360
+  - {id: sl-67713, preset: spacebee, orbit: {norad: 67713}, freq_hz: 137.9265e6}   # STARLINK-36708, RAAN 55
+  - {id: sl-68308, preset: spacebee, orbit: {norad: 68308}, freq_hz: 137.9265e6}   # STARLINK-37138, RAAN 71
+  - {id: sl-53086, preset: spacebee, orbit: {norad: 53086}, freq_hz: 137.9265e6}   # STARLINK-4318, RAAN 121
+  - {id: sl-68626, preset: spacebee, orbit: {norad: 68626}, freq_hz: 137.9265e6}   # STARLINK-37285, RAAN 144
+  - {id: sl-68231, preset: spacebee, orbit: {norad: 68231}, freq_hz: 137.9265e6}   # STARLINK-37104, RAAN 179
+  - {id: sl-67891, preset: spacebee, orbit: {norad: 67891}, freq_hz: 137.9265e6}   # STARLINK-36816, RAAN 237
+  - {id: sl-68026, preset: spacebee, orbit: {norad: 68026}, freq_hz: 137.9265e6}   # STARLINK-36884, RAAN 252
+  - {id: sl-56339, preset: spacebee, orbit: {norad: 56339}, freq_hz: 137.9265e6}   # STARLINK-5552, RAAN 300
+  - {id: sl-68162, preset: spacebee, orbit: {norad: 68162}, freq_hz: 137.9265e6}   # STARLINK-37013, RAAN 324

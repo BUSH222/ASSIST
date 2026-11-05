@@ -1,0 +1,107 @@
+# What the station sees, live: a complete 137 MHz sky streamed over rtl_tcp.
+#
+#   uv run assist serve scenarios/realtime.yaml --lookahead 4s   # rtl_tcp on 127.0.0.1:1234, wall-clock time, Ctrl-C stops
+#   uv run assist passes scenarios/realtime.yaml --to +6h    # which satellites rise, and when
+#   uv run assist truth  scenarios/realtime.yaml -o out/realtime/truth.csv --to +30min
+# SDR++: source "RTL-TCP", host 127.0.0.1, port 1234, sample rate 2.4 MHz (the stream is fixed at 137.000 MHz).
+#
+# The clock starts `now`, so the sky is the real one: satellites appear when the element sets say they are overhead,
+# and the hourly rates of the terrestrial traffic are those of the current UTC hour. Which passes there are in the
+# next hour depends on when you start it; `assist passes` lists them.
+#
+# 1. Noise floor     the profile's measured shape and ADC noise (`profile: profiles/vhf137`).
+# 2. Local           receiver birdies and the USB noise humps (from the included terrestrial environment).
+# 3. Aircraft        VDL Mode 2 and VDL Mode 4 bursts, from ground stations (fixed level) and from aircraft (each burst
+#                    its own offset and level), and AM air-traffic voice on 14 channels (the included environment).
+# 4. Space, LoRa     ten Starlink satellites, on polar orbits in ten different planes, standing in for SpaceBEE: LoRa
+#                    on 137.9265 MHz, overlapping METEOR's band (as in meteor_lora.yaml).
+# 5. Spacecraft      METEOR-M2 3 and M2-4 (LRPT on 137.9 MHz) and the eight ORBCOMM FM1xx satellites of active.csv.
+#                    Each ORBCOMM draws two of the twelve subscriber channels S-1 .. S-12 (keyed by the seed and the
+#                    source id, so they are fixed for a seed); the gateway downlink at 137.56 MHz is on for three of the
+#                    eight, one in each of three orbital planes (FM108, FM113, FM118).
+# 6. Zombies         five dead satellites with a carrier on a hand-picked frequency in 136-137 MHz and no tumble (no AM):
+#                    TRANSIT 5B-5 and ALOUETTE 2 transmit continuously, the OPS 7613 and OPS 7898 objects 80 s on and
+#                    80 s off.
+#
+# The 138.1104 MHz carrier of the included environment is switched off below; delete the `carrier-138` entry to get it.
+# Element sets are the 2026-11-02 snapshots in elements/; `assist elements fetch -o elements` brings fresh ones (then
+# list the new files under `elements`). Satellite passes need up-to-date elements to be where the real ones are.
+# With ~50 sources the first second of the stream takes a couple of seconds to prepare; `--lookahead 4s` gives the
+# server that head start (without it the first seconds are late once, then the stream runs on time). One core renders
+# this scenario at about 7x real time (`assist bench scenarios/realtime.yaml` measures it).
+version: 1
+seed: 137
+clock: {start: now, duration: 24h}
+profile: profiles/vhf137
+elements:
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+include: [bands/vhf137/terrestrial_default.yaml]
+sinks:
+  - rtl_tcp: {port: 1234}
+
+sources:
+  # --- terrestrial: everything else comes from the include ---
+  - {id: carrier-138, carrier: {enabled: false}}
+
+  # --- METEOR-M2 3 and M2-4: LRPT, level from the calibration of each satellite ---
+  - {id: meteor-m2-3, preset: meteor_lrpt, orbit: {norad: 57166}}
+  - {id: meteor-m2-4, preset: meteor_lrpt, orbit: {norad: 59051}}
+
+  # --- ORBCOMM FM1xx from active.csv: channels drawn per satellite, the gateway on for FM108, FM113, FM118 ---
+  - {id: orbcomm-fm109, preset: orbcomm, orbit: {norad: 40086}, gateway: {enabled: false}}
+  - {id: orbcomm-fm110, preset: orbcomm, orbit: {norad: 41182}, gateway: {enabled: false}}
+  - {id: orbcomm-fm118, preset: orbcomm, orbit: {norad: 41183}, gateway: {enabled: true}}
+  - {id: orbcomm-fm112, preset: orbcomm, orbit: {norad: 41184}, gateway: {enabled: false}}
+  - {id: orbcomm-fm113, preset: orbcomm, orbit: {norad: 41185}, gateway: {enabled: true}}
+  - {id: orbcomm-fm108, preset: orbcomm, orbit: {norad: 41187}, gateway: {enabled: true}}
+  - {id: orbcomm-fm117, preset: orbcomm, orbit: {norad: 41188}, gateway: {enabled: false}}
+  - {id: orbcomm-fm116, preset: orbcomm, orbit: {norad: 41189}, gateway: {enabled: false}}
+
+  # --- Starlink satellites carrying SpaceBEE-style LoRa (one per orbital plane; RAAN as in the element sets) ---
+  - {id: sl-53216, preset: spacebee, orbit: {norad: 53216}, freq_hz: 137.9265e6}   # STARLINK-4376, RAAN 360
+  - {id: sl-67713, preset: spacebee, orbit: {norad: 67713}, freq_hz: 137.9265e6}   # STARLINK-36708, RAAN 55
+  - {id: sl-68308, preset: spacebee, orbit: {norad: 68308}, freq_hz: 137.9265e6}   # STARLINK-37138, RAAN 71
+  - {id: sl-53086, preset: spacebee, orbit: {norad: 53086}, freq_hz: 137.9265e6}   # STARLINK-4318, RAAN 121
+  - {id: sl-68626, preset: spacebee, orbit: {norad: 68626}, freq_hz: 137.9265e6}   # STARLINK-37285, RAAN 144
+  - {id: sl-68231, preset: spacebee, orbit: {norad: 68231}, freq_hz: 137.9265e6}   # STARLINK-37104, RAAN 179
+  - {id: sl-67891, preset: spacebee, orbit: {norad: 67891}, freq_hz: 137.9265e6}   # STARLINK-36816, RAAN 237
+  - {id: sl-68026, preset: spacebee, orbit: {norad: 68026}, freq_hz: 137.9265e6}   # STARLINK-36884, RAAN 252
+  - {id: sl-56339, preset: spacebee, orbit: {norad: 56339}, freq_hz: 137.9265e6}   # STARLINK-5552, RAAN 300
+  - {id: sl-68162, preset: spacebee, orbit: {norad: 68162}, freq_hz: 137.9265e6}   # STARLINK-37013, RAAN 324
+
+  # --- Zombies: real, long-dead satellites with a live carrier. am: null = not spinning (steady amplitude). ---
+  - id: zombie-transit-5b5          # OPS 6582 (TRANSIT 5B-5)
+    preset: zombie
+    orbit: {norad: 965}
+    freq_hz: 136.5872e6
+    schedule: {type: continuous}
+    am: null
+    level: {cn0_zenith_dbhz: 46}
+  - id: zombie-alouette-2           # ALOUETTE 2
+    preset: zombie
+    orbit: {norad: 1804}
+    freq_hz: 136.8031e6
+    schedule: {type: continuous}
+    am: null
+    level: {cn0_zenith_dbhz: 44}
+  - id: zombie-ops7613-pl1          # OPS 7613 (P/L 1)
+    preset: zombie
+    orbit: {norad: 4256}
+    freq_hz: 136.4118e6
+    schedule: {on_s: 80, off_s: 80}
+    am: null
+    level: {cn0_zenith_dbhz: 45}
+  - id: zombie-ops7613-pl4          # OPS 7613 (P/L 4)
+    preset: zombie
+    orbit: {norad: 4237}
+    freq_hz: 136.7524e6
+    schedule: {on_s: 80, off_s: 80}
+    am: null
+    level: {cn0_zenith_dbhz: 43}
+  - id: zombie-ops7898-pl2          # OPS 7898 (P/L 2)
+    preset: zombie
+    orbit: {norad: 5680}
+    freq_hz: 136.5213e6
+    schedule: {on_s: 80, off_s: 80}
+    am: null
+    level: {cn0_zenith_dbhz: 47}

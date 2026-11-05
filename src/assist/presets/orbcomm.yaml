@@ -1,0 +1,24 @@
+# ORBCOMM (plan §6.5): two subscriber downlinks (`sdpsk`, 4800 sym/s, RRC alpha 0.4) on two of the channels
+# S-1 .. S-12 (band.yaml), drawn once per satellite (keyed by the source id, so fixed for the object's life), and the
+# gateway downlink (`oqpsk_burst`, 28.8 ksym/s bursts) at 137.56 MHz on half of the satellites.
+# Level `cal: orbcomm` (M2, from FM117 in the recording) for all three; the gateway's level is an assumption.
+# Override per source, e.g. `channels: [S-5, S-8]` or `gateway: {enabled: true}`.
+platform: satellite
+channels: "sample([S-1, S-2, S-3, S-4, S-5, S-6, S-7, S-8, S-9, S-10, S-11, S-12], 2)"
+emitters:
+  - id: stx1
+    signal: {kind: sdpsk}
+    channel: 0
+    level: {cal: orbcomm}
+    pattern: qfh_poly
+  - id: stx2
+    signal: {kind: sdpsk}
+    channel: 1
+    level: {cal: orbcomm}
+    pattern: qfh_poly
+  - id: gateway
+    enabled: "bernoulli(0.5)"
+    signal: {kind: oqpsk_burst}
+    channel: orbcomm_gateway
+    level: {cal: orbcomm}
+    pattern: qfh_poly

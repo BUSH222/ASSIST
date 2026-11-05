@@ -1,0 +1,13 @@
+# VDL Mode 2 bursts from aircraft (M7): no flight geometry (your choice). Each burst gets its own frequency offset
+# (uniform within +-2 kHz) and level (normal around the emitter's level, clipped). Give `freq_hz`, the level (the
+# median) and the rate; `signal: {kind: gfsk}` for VDL Mode 4.
+platform: ground
+emitters:
+  - id: vdl
+    signal: {kind: d8psk}
+    freq_hz: 136.975e6
+    schedule: {type: poisson_events, rate_per_hour: 1800}
+    level: {cn0_dbhz: 61}
+    per_event:
+      offset_hz: [-2000, 2000]
+      level_db: {dist: normal, sigma_db: 5, min_db: -12, max_db: 12}
