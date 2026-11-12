@@ -10,8 +10,7 @@ version: 1
 seed: 42
 clock: {start: now, duration: 2h}
 profile: profiles/vhf137
-elements:
-  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+elements: {latest: true}   # today's active + satnogs snapshots in elements/, downloaded if missing
 
 sources:
   - id: m2-3

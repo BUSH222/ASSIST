@@ -8,6 +8,7 @@ Files are only read here; the network is touched only by `fetch`, which the user
 import csv
 import datetime as dt
 import json
+import re
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -200,6 +201,8 @@ def snapshot_name(feed: str, now: dt.datetime) -> str:
 
 
 Opener = Callable[[str], "BinaryIO"]
+ELEMENTS_DIR = "elements"
+_SNAPSHOT = re.compile(r"^(?P<feed>[a-z]+)_(?P<date>\d{4}-\d{2}-\d{2})\.csv$")
 
 
 def _open_url(url: str) -> BinaryIO:
@@ -244,3 +247,43 @@ def fetch(
         part.rename(target)
         written.append(target)
     return written
+
+
+def existing_snapshots(out_dir: str | Path) -> dict[str, Path]:
+    """The newest `<feed>_<date>.csv` per known feed in `out_dir` (feeds without a snapshot are absent)."""
+    best: dict[str, tuple[str, Path]] = {}
+    d = Path(out_dir)
+    for p in d.iterdir() if d.is_dir() else ():
+        m = _SNAPSHOT.match(p.name)
+        if m and m["feed"] in FEEDS and (m["feed"] not in best or m["date"] > best[m["feed"]][0]):
+            best[m["feed"]] = (m["date"], p)
+    return {feed: best[feed][1] for feed in FEEDS if feed in best}
+
+
+def latest_snapshots(
+    out_dir: str | Path,
+    download: bool,
+    now: dt.datetime | None = None,
+    opener: Opener | None = None,
+) -> tuple[list[Path], list[str]]:
+    """The element files a scenario's `latest` / `latest_existing` stands for, and warnings.
+
+    download=False (`latest_existing`): the newest snapshot per feed already in `out_dir`.
+    download=True (`latest`): today's (UTC) snapshot per feed; the missing ones are fetched first. If a fetch fails
+    the newest existing snapshot of that feed is used, with a warning. Raises FileNotFoundError when no file results.
+    """
+    now = now or dt.datetime.now(dt.UTC)
+    out = Path(out_dir)
+    warnings: list[str] = []
+    if download:
+        missing = [f for f in FEEDS if not (out / snapshot_name(f, now)).exists()]
+        if missing:
+            try:
+                fetch(missing, out, now, opener or _open_url)
+            except (OSError, ValueError) as e:  # URLError is an OSError
+                warnings.append(f"could not download today's element sets ({e}); using the newest files in {out}")
+    found = existing_snapshots(out)
+    if not found:
+        hint = "" if download else " (run `assist fetch_omm`)"
+        raise FileNotFoundError(f"no element snapshots (<feed>_<date>.csv) in {out}{hint}")
+    return list(found.values()), warnings

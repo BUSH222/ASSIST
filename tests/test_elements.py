@@ -5,7 +5,7 @@ import datetime as dt
 import io
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -109,3 +109,72 @@ def test_fetch_rejects_bad_content(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("active_*"))
     with pytest.raises(ValueError, match="unknown feed"):
         E.fetch(["celestrak"], tmp_path)
+
+
+def _scenario_doc(elements: dict[str, object]) -> dict[str, Any]:
+    from assist.config import loader
+
+    doc = loader.load_scenario(Path(__file__).parent / "fixtures" / "scenario_basic.yaml")
+    doc["elements"] = elements
+    return doc
+
+
+def test_latest_downloads_only_what_is_missing(tmp_path: Path) -> None:
+    body = FIXTURE.read_bytes()
+    op, calls = _opener(body)
+    now = dt.datetime(2026, 11, 5, 8, tzinfo=dt.UTC)
+    (tmp_path / "active_2026-11-05.csv").write_bytes(body)
+    paths, warns = E.latest_snapshots(tmp_path, download=True, now=now, opener=op)
+    assert calls == [E.FEEDS["satnogs"]] and not warns
+    assert [p.name for p in paths] == ["active_2026-11-05.csv", "satnogs_2026-11-05.csv"]
+    calls.clear()
+    E.latest_snapshots(tmp_path, download=True, now=now, opener=op)
+    assert calls == []  # today's files are there: no network
+
+
+def test_latest_falls_back_to_existing_when_the_download_fails(tmp_path: Path) -> None:
+    (tmp_path / "active_2026-11-02.csv").write_bytes(FIXTURE.read_bytes())
+
+    def down(url: str) -> _Resp:
+        raise OSError("offline")
+
+    paths, warns = E.latest_snapshots(tmp_path, True, dt.datetime(2026, 11, 5, tzinfo=dt.UTC), down)
+    assert [p.name for p in paths] == ["active_2026-11-02.csv"] and "offline" in warns[0]
+    with pytest.raises(FileNotFoundError, match="no element snapshots"):
+        E.latest_snapshots(tmp_path / "none", True, dt.datetime(2026, 11, 5, tzinfo=dt.UTC), down)
+
+
+def test_latest_existing_picks_the_newest_per_feed(tmp_path: Path) -> None:
+    for n in (
+        "active_2026-10-30.csv",
+        "active_2026-11-02.csv",
+        "satnogs_2026-11-01.csv",
+        "active_2026-11-09.csv.part",
+    ):
+        (tmp_path / n).write_text("x")
+    paths, warns = E.latest_snapshots(tmp_path, download=False)
+    assert [p.name for p in paths] == ["active_2026-11-02.csv", "satnogs_2026-11-01.csv"] and not warns
+    with pytest.raises(FileNotFoundError, match="fetch_omm"):
+        E.latest_snapshots(tmp_path / "none", download=False)
+
+
+def test_scenario_latest_existing_resolves_to_concrete_files(tmp_path: Path) -> None:
+    from assist.config.resolve import resolve_document
+
+    (tmp_path / "elements").mkdir()
+    (tmp_path / "elements" / "active_2026-11-02.csv").write_bytes(FIXTURE.read_bytes())
+    r = resolve_document(_scenario_doc({"latest_existing": True}), tmp_path)
+    assert r.scenario.elements.files == ["elements/active_2026-11-02.csv"]
+    assert not r.scenario.elements.latest_existing  # the resolved scenario never looks again
+
+
+def test_scenario_errors_name_the_problem(tmp_path: Path) -> None:
+    from assist.config.loader import ConfigError
+    from assist.config.resolve import resolve_document
+
+    with pytest.raises(ConfigError, match="no element snapshots"):
+        resolve_document(_scenario_doc({"latest_existing": True}), tmp_path)
+    with pytest.raises(ConfigError, match=r"NORAD 41188 is in none of the element files"):
+        resolve_document(_scenario_doc({}), tmp_path)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        resolve_document(_scenario_doc({"latest": True, "latest_existing": True}), tmp_path)

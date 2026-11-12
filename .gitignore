@@ -161,3 +161,6 @@ cython_debug/
 
 # uv specific
 .uv/
+# Element-set snapshots are downloaded with `assist fetch_omm`
+elements/*
+!elements/.gitkeep

@@ -600,12 +600,7 @@ def serve(
         raise typer.Exit(code)
 
 
-@elements_app.command()
-def fetch(
-    feeds: Annotated[str, typer.Option(help="Comma-separated feeds: active, satnogs.")] = "active,satnogs",
-    out: Annotated[Path, typer.Option("-o", "--out", help="Snapshot directory.")] = Path("samples/elements"),
-) -> None:
-    """Download dated snapshots from retlector.eu (network). Existing files are never overwritten."""
+def _fetch_feeds(feeds: str, out: Path) -> None:
     from assist.orbits.elements import fetch as do_fetch
 
     try:
@@ -615,3 +610,24 @@ def fetch(
         raise typer.Exit(1) from e
     for p in paths:
         typer.echo(str(p))
+
+
+@app.command(name="fetch_omm")
+def fetch_omm(
+    feeds: Annotated[str, typer.Option(help="Comma-separated feeds: active, satnogs.")] = "active,satnogs",
+    out: Annotated[Path, typer.Option("-o", "--out", help="Snapshot directory.")] = Path("elements"),
+) -> None:
+    """Download active_<date>.csv and satnogs_<date>.csv from retlector.eu into elements/ (network).
+
+    The date is the UTC day of the request. Existing files are never overwritten.
+    """
+    _fetch_feeds(feeds, out)
+
+
+@elements_app.command()
+def fetch(
+    feeds: Annotated[str, typer.Option(help="Comma-separated feeds: active, satnogs.")] = "active,satnogs",
+    out: Annotated[Path, typer.Option("-o", "--out", help="Snapshot directory.")] = Path("elements"),
+) -> None:
+    """Same as `assist fetch_omm`."""
+    _fetch_feeds(feeds, out)

@@ -109,7 +109,7 @@ clock start (`+7min`, `+90s`, `+2h`). A duration is `90s`, `10min`, `2h`, `1d` o
 | `serve SCENARIO [--host H] [--port P] [--pacing realtime\|unpaced] [--from T] [--duration D] [--lookahead 1s] [-o DIR]` | Serve the stream over rtl_tcp until Ctrl-C (or `--duration`). |
 | `bench SCENARIO [--from T] [--duration 60s] [--workers N] [-o DIR]` | Render speed relative to real time on one worker and on N workers, without writing IQ. Also checks that both give identical streams. |
 | `schema [-o FILE]` | The JSON Schema of a resolved scenario. |
-| `elements fetch [--feeds active,satnogs] [-o DIR]` | **Network.** Download dated element-set snapshots from retlector.eu. Existing files are never overwritten. |
+| `fetch_omm [--feeds active,satnogs] [-o DIR]` | **Network.** Download `active_<date>.csv` and `satnogs_<date>.csv` from retlector.eu into `elements/`. Existing files are never overwritten. (`elements fetch` is the same command.) |
 | `profile build \| labels \| report \| terrestrial` | Extract the noise profile and the terrestrial environment from your own recordings (see [Bands and profiles](#bands-and-profiles)). |
 
 Notes on the individual commands:
@@ -179,6 +179,8 @@ every level becomes a transmit power (satellites) or a received power (ground an
 | `frontend` | from the band | Receiver model, see below. |
 | `antenna.pattern` | `qfh_poly` | Receive antenna gain versus elevation, see below. |
 | `elements.files` | `[]` | Element-set files (OMM CSV or JSON, or TLE) for catalog orbits. |
+| `elements.latest` | `false` | Use today's (UTC) `active_<date>.csv` and `satnogs_<date>.csv` from `elements/`; those missing are downloaded first, as `assist fetch_omm` does (network only then; if the download fails the newest existing files are used, with a warning). |
+| `elements.latest_existing` | `false` | Use the newest `active_*` and `satnogs_*` files already in `elements/`; no network. Exclusive with `latest`. Either flag adds its files before `elements.files`. |
 | `include` | – | A path or list of paths of YAML files merged underneath this one. |
 | `sinks` | `[]` | Output settings: `rtl_tcp` and `fft` entries. |
 | `sources` | `[]` | The signal sources. |
@@ -547,8 +549,8 @@ sources:
 `assist catalog scenarios/catalog_errors.yaml -o out/catalog.tle` is what the tracker is given and
 `assist truth ...` is what really happened.
 
-**Fresh element sets:** `uv run assist elements fetch -o elements` (network; tells you the file names), then list them under
-`elements.files`. Passes of real satellites are only where the real ones are if the element sets are recent.
+**Fresh element sets:** `elements: {latest: true}` in the scenario downloads today's snapshots when needed (or `uv run assist fetch_omm`, then
+`latest_existing: true` or `elements.files`). Passes of real satellites are only where the real ones are if the element sets are recent.
 
 ## Outputs
 
@@ -569,7 +571,7 @@ Default output directories (`out/`, `temp/`) are gitignored.
 ## Element sets
 
 Catalog orbits need element sets in an OMM CSV (retlector.eu layout, with the header `OBJECT_NAME,OBJECT_ID,EPOCH,MEAN_MOTION,...`), OMM JSON or TLE. The
-repository ships the snapshots of 2026-11-02 in `elements/`: `active_2026-11-02.csv` (active satellites) and `satnogs_2026-11-02.csv` (the SatNOGS feed,
+snapshots of 2026-11-02 (not tracked by git; run `assist fetch_omm` to get current ones) are in `elements/`: `active_2026-11-02.csv` (active satellites) and `satnogs_2026-11-02.csv` (the SatNOGS feed,
 including TRANSIT 5B-5, ALOUETTE 2 and the OPS objects). A scenario takes, per object, the element set whose epoch is nearest the clock start, and
 `assist` warns when it is more than 14 days older than the window. METEOR-M2 3 (57166), METEOR-M2 4 (59051), the ORBCOMM FM satellites and the Starlinks
 are in `active.csv`.

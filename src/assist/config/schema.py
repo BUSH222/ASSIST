@@ -139,6 +139,20 @@ class Antenna(_M):
 
 class Elements(_M):
     files: list[str] = Field(default_factory=list, description="OMM CSV/JSON or TLE files (paths from the cwd).")
+    latest: bool = Field(
+        False,
+        description="Use today's (UTC) active and satnogs snapshots in elements/, downloading those that are missing "
+        "(as `assist fetch_omm` does). Network only when today's files are not there.",
+    )
+    latest_existing: bool = Field(
+        False, description="Use the newest active and satnogs snapshots already in elements/ (no network)."
+    )
+
+    @model_validator(mode="after")
+    def _one_latest(self) -> Elements:
+        if self.latest and self.latest_existing:
+            raise ValueError("elements: latest and latest_existing are mutually exclusive")
+        return self
 
 
 class Perturb(_M):

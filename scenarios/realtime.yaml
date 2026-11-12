@@ -24,8 +24,8 @@
 #                    80 s off.
 #
 # The 138.1104 MHz carrier of the included environment is switched off below; delete the `carrier-138` entry to get it.
-# Element sets are the 2026-11-02 snapshots in elements/; `assist elements fetch -o elements` brings fresh ones (then
-# list the new files under `elements`). Satellite passes need up-to-date elements to be where the real ones are.
+# Element sets: `elements: {latest: true}` uses today's snapshots in elements/ and downloads them when missing (network);
+# `latest_existing: true` takes the newest ones already there. Passes need recent elements to be where the real ones are.
 # With ~50 sources the first second of the stream takes a couple of seconds to prepare; `--lookahead 4s` gives the
 # server that head start (without it the first seconds are late once, then the stream runs on time). One core renders
 # this scenario at about 7x real time (`assist bench scenarios/realtime.yaml` measures it).
@@ -33,8 +33,7 @@ version: 1
 seed: 137
 clock: {start: now, duration: 24h}
 profile: profiles/vhf137
-elements:
-  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+elements: {latest: true}   # today's active + satnogs snapshots in elements/, downloaded if missing
 include: [bands/vhf137/terrestrial_default.yaml]
 sinks:
   - rtl_tcp: {port: 1234}

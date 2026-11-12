@@ -29,7 +29,14 @@ from assist.config import schema as S
 from assist.config.loader import ConfigError, band_dir, load_band, load_scenario
 from assist.config.randexpr import draw_all
 from assist.emitters import link
-from assist.orbits.elements import ElementSet, ElementStore, epoch_unix, staleness_warning
+from assist.orbits.elements import (
+    ELEMENTS_DIR,
+    ElementSet,
+    ElementStore,
+    epoch_unix,
+    latest_snapshots,
+    staleness_warning,
+)
 from assist.orbits.synthetic import RE_KM, PassRequest, solve_pass
 from assist.rng import KeyedRng
 from assist.station import DEFAULT_FILE, Station, load_station
@@ -173,6 +180,25 @@ class _Ctx:
         return items[int(self.rng.stream("resolve", sid, path).integers(len(items)))]
 
 
+def _concrete_elements(cx: _Ctx) -> S.Scenario:
+    """Turn `elements.latest` / `latest_existing` into the file list they stand for (downloading for `latest`).
+
+    The resolved scenario lists the files and sets both flags to false, so catalog tools and a re-resolve of the
+    resolved document read the same files and never download again.
+    """
+    el = cx.sc.elements
+    if not (el.latest or el.latest_existing):
+        return cx.sc
+    try:
+        paths, warns = latest_snapshots(cx.base / ELEMENTS_DIR, download=el.latest)
+    except FileNotFoundError as e:
+        raise ConfigError(str(e)) from e
+    cx.warnings += warns
+    files = [p.relative_to(cx.base).as_posix() for p in paths]
+    files += [f for f in el.files if f not in files]
+    return cx.sc.model_copy(update={"elements": S.Elements(files=files)})
+
+
 def synthetic_norad(source_id: str) -> int:
     return 90000 + int.from_bytes(hashlib.blake2b(source_id.encode(), digest_size=8).digest(), "little") % 10000
 
@@ -182,7 +208,11 @@ def _orbit(cx: _Ctx, src: S.Source, station: Station) -> tuple[Any, bool]:
     if isinstance(o, S.CatalogOrbit):
         if o.omm is None:
             t_sel = parse_iso(o.epoch) if o.epoch else cx.t0
-            es = cx.store().nearest(o.norad, t_sel)
+            try:
+                es = cx.store().nearest(o.norad, t_sel)
+            except KeyError as e:
+                where = ", ".join(cx.sc.elements.files) or "none; set elements.files, latest or latest_existing"
+                raise ConfigError(f"source {src.id}: NORAD {o.norad} is in none of the element files ({where})") from e
             o = o.model_copy(update={"omm": es.omm})
         w = staleness_warning(_set_of(o), cx.t0)
         if w:
@@ -329,6 +359,7 @@ def resolve_document(doc: dict[str, Any], base: Path, now: float | None = None) 
         sc = sc.model_copy(update={"clock": sc.clock.model_copy(update={"start": format_iso(t_now)})})
     sc = sc.model_copy(update={"station": _station(sc.station, base)})
     cx = _Ctx(sc, base, band)
+    sc = cx.sc = _concrete_elements(cx)
     station = Station(sc.station.lat, sc.station.lon, sc.station.alt_m, sc.station.tz)
     sources = []
     for src in sc.sources:
