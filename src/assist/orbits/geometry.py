@@ -1,14 +1,21 @@
 """Satellite geometry seen from the station.
 
-Two layers:
-- Direct Skyfield evaluation (`topocentric`, `geometry`, `find_passes`): what the profile tool uses.
-- `SplineGeometry` for the simulator: Skyfield sampled at whole Unix seconds over aligned one-hour blocks (plus
+Three layers:
+- Direct Skyfield evaluation (`topocentric`, `geometry`, `find_passes`): what the profile tool uses, and the
+  reference the tests hold the simulator to.
+- Direct SGP4 evaluation (`sgp4_topocentric`): the satellite's SGP4 model in TEME, rotated to Earth-fixed axes by
+  GMST 1982 at UT1 (as Skyfield's TEME frame does), seen from the station's WGS84 position. No precession or
+  nutation is needed, since the station-to-satellite geometry does not depend on the inertial frame used. Polar
+  motion is ignored, as Skyfield does without a loaded table. Against full Skyfield: range within ~1 mm (LEO) to
+  ~4 cm (15 h deep-space passes), angles within 1e-6 deg, about 30x faster.
+- `SplineGeometry` for the simulator: direct SGP4 sampled at whole Unix seconds over aligned one-hour blocks (plus
   2 min each side), turned into cubic splines. Range rate is the derivative of the range spline. Because the sample
   grid never depends on the requested window, any window gives the same values (random access). Passes come from
-  the same samples, so a pass's key second (`aos_key`, the first whole second at or above the horizon) is the same
+  the same samples, so a pass's key second (`aos_key`, the whole second nearest the AOS) is the same
   whichever window asked for it.
 """
 
+import math
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -30,6 +37,10 @@ if TYPE_CHECKING:
     from assist.station import Station
 
 C_M_S = 299_792_458.0
+DAY_S = 86400
+JD_UNIX_EPOCH = 2440587.5  # Julian date of 1970-01-01 00:00 UTC
+JD_J2000 = 2451545.0
+OMEGA_EARTH = 7.292115146706979e-5  # rad/s, the Earth rotation rate with GMST 1982 (Vallado)
 BLOCK_S = 3600
 MARGIN_S = 120
 LOOK_BLOCKS = 24  # how far (in blocks) to look for the AOS of a pass in progress, or the LOS of an open one
@@ -43,7 +54,7 @@ class Pass:
     tca: float  # culmination
     los: float
     max_el_deg: float
-    aos_key: int | None = None  # simulator passes: first whole Unix second at or above the horizon (RNG key)
+    aos_key: int | None = None  # simulator passes: the whole Unix second nearest the AOS (RNG key)
 
 
 @dataclass(frozen=True)
@@ -91,6 +102,76 @@ def geometry(row: Mapping[str, Any], station: Station, t_unix: np.ndarray) -> Ge
     return topocentric(satellite_from_omm(row), station, t_unix)
 
 
+# --- simulator: direct SGP4 evaluation ---
+
+
+@dataclass(frozen=True)
+class StationFrame:
+    """The station's Earth-fixed position (km) and local east, north, up unit vectors (WGS84 geodetic)."""
+
+    ecef_km: np.ndarray
+    east: np.ndarray
+    north: np.ndarray
+    up: np.ndarray
+
+
+def station_frame(station: Station) -> StationFrame:
+    lat, lon = np.radians(station.lat_deg), np.radians(station.lon_deg)
+    sl, cl, so, co = np.sin(lat), np.cos(lat), np.sin(lon), np.cos(lon)
+    return StationFrame(
+        np.asarray(station_position(station).itrs_xyz.km, dtype=np.float64),  # Skyfield's own WGS84 position
+        np.array([-so, co, 0.0]),
+        np.array([-sl * co, -sl * so, cl]),
+        np.array([cl * co, cl * so, sl]),
+    )
+
+
+def gmst82(jd_whole: np.ndarray | float, jd_frac: np.ndarray | float) -> np.ndarray:
+    """Greenwich mean sidereal time (rad), IAU 1982, of a UT1 Julian date given in two parts.
+
+    The formula of sgp4's `gstime` (and Skyfield's TEME frame), vectorised. The parts are never added into one float:
+    that alone would cost ~40 us of time resolution (~1 cm of station position).
+    """
+    tut1 = ((np.asarray(jd_whole) - JD_J2000) + np.asarray(jd_frac)) / 36525.0
+    s = -6.2e-6 * tut1**3 + 0.093104 * tut1**2 + (876600.0 * 3600 + 8640184.812866) * tut1 + 67310.54841
+    return np.mod(np.radians(s / 240.0), 2 * np.pi)
+
+
+def sgp4_topocentric(model: Any, frame: StationFrame, t0: int, dt_s: np.ndarray) -> Geometry:  # model: sgp4 Satrec
+    """Geometry at Unix times t0 + dt_s from the satellite's SGP4 model directly (no Skyfield in the loop).
+
+    t0 is a whole Unix second and dt_s the offsets from it, so times keep full precision. UT1 - UTC comes from
+    Skyfield's built-in table at every time, which keeps the result a pure function of time (one value per block would
+    step the station by ~1 cm at block boundaries). Range rate here uses SGP4's velocity; SplineGeometry takes the
+    derivative of its range spline instead. SGP4 errors (e.g. decayed orbits) give NaN, as with Skyfield.
+    """
+    dt_s = np.asarray(dt_s, dtype=np.float64)
+    day0 = t0 // DAY_S
+    sec = float(t0 - day0 * DAY_S) + dt_s  # seconds from the UTC midnight starting day0
+    jd_whole = float(day0) + JD_UNIX_EPOCH
+    _err, r, v = model.sgp4_array(np.full(dt_s.shape, jd_whole), sec / DAY_S)  # TEME, km, km/s; UTC as Skyfield
+    dut1 = np.asarray(unix_to_time(t0 + dt_s).dut1, dtype=np.float64)
+    th = gmst82(jd_whole, (sec + dut1) / DAY_S)
+    c, s = np.cos(th), np.sin(th)
+    x = c * r[..., 0] + s * r[..., 1]  # TEME -> Earth-fixed (pseudo-Earth-fixed; polar motion ignored)
+    y = -s * r[..., 0] + c * r[..., 1]
+    r_sat = np.stack([x, y, r[..., 2]], axis=-1)
+    v_sat = np.stack(
+        [c * v[..., 0] + s * v[..., 1] + OMEGA_EARTH * y, -s * v[..., 0] + c * v[..., 1] - OMEGA_EARTH * x, v[..., 2]],
+        axis=-1,
+    )
+    d = r_sat - frame.ecef_km  # station -> satellite
+    rng = np.linalg.norm(d, axis=-1)
+    cross = np.linalg.norm(np.cross(r_sat, d), axis=-1)
+    return Geometry(
+        np.degrees(np.arcsin(np.clip((d @ frame.up) / rng, -1.0, 1.0))),
+        np.degrees(np.arctan2(d @ frame.east, d @ frame.north)) % 360.0,
+        rng * 1e3,
+        np.sum(d * v_sat, axis=-1) / rng * 1e3,
+        np.degrees(np.arctan2(cross, np.sum(r_sat * d, axis=-1))),
+    )
+
+
 # --- profile tool: passes by Skyfield's find_events, clipped to the window ---
 
 
@@ -136,14 +217,17 @@ def _make_pass(
 class _Crossing:
     t: float  # refined crossing time
     rising: bool
-    key: int  # first whole second on the new side (visible for rising, invisible for setting)
+    # The whole Unix second nearest the crossing. Nearest, not the first one after it: a synthetic pass is solved to
+    # rise within nanoseconds of a requested whole second, which "first after" would turn into a coin toss between
+    # two keys; "nearest" puts the flip 0.5 s away from it.
+    key: int
 
 
 class _Block:
-    def __init__(self, sat: EarthSatellite, topo: GeographicPosition, index: int, horizon_deg: float) -> None:
+    def __init__(self, model: Any, frame: StationFrame, index: int, horizon_deg: float) -> None:  # sgp4 Satrec
         self.t0 = index * BLOCK_S
         self.ts = np.arange(-MARGIN_S, BLOCK_S + MARGIN_S + 1, dtype=np.float64)  # seconds from t0
-        g = _evaluate(sat, topo, unix_to_time_fast(self.t0 + self.ts))
+        g = sgp4_topocentric(model, frame, self.t0, self.ts)
         self.samples = g
         self.range = CubicSpline(self.ts, g.range_m)
         self.range_rate = self.range.derivative()
@@ -160,7 +244,7 @@ class _Block:
         for i in np.flatnonzero(vis[:-1] != vis[1:]):
             a = float(self.ts[MARGIN_S + i])
             t = brentq(lambda x: float(self.el(x)) - horizon_deg, a, a + 1.0, xtol=1e-9)
-            out.append(_Crossing(self.t0 + t, bool(vis[i + 1]), self.t0 + int(a) + 1))
+            out.append(_Crossing(self.t0 + t, bool(vis[i + 1]), self.t0 + math.floor(t + 0.5)))
         return out
 
     def geometry(self, t_rel: np.ndarray) -> Geometry:
@@ -187,14 +271,15 @@ class SplineGeometry:
     ) -> None:
         self.sat, self.station, self.horizon_deg = sat, station, horizon_deg
         self.norad, self.name = norad, name
-        self._topo = station_position(station)
+        self._model = sat.model
+        self._frame = station_frame(station)
         self._cache: OrderedDict[int, _Block] = OrderedDict()
         self._cache_blocks = cache_blocks
 
     def _block(self, index: int) -> _Block:
         b = self._cache.get(index)
         if b is None:
-            b = _Block(self.sat, self._topo, index, self.horizon_deg)
+            b = _Block(self._model, self._frame, index, self.horizon_deg)
             self._cache[index] = b
             while len(self._cache) > self._cache_blocks:
                 self._cache.popitem(last=False)

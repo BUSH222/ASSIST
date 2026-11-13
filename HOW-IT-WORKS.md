@@ -188,7 +188,7 @@ moved to its place in the 2.4 MHz band by *placing its spectrum into a big FFT*.
 | **Coarse bin** | The 50 Hz FFT bin nearest an emitter's frequency (`f_bin = fc + k * 50 Hz`). The residual offset is handled at the narrow rate. |
 | **Control samples** | Per-emitter values (amplitude, carrier phase) computed at 1000 per second and interpolated to the narrow rate. |
 | **AOS / TCA / LOS** | Acquisition / time of closest approach (culmination) / loss of signal of a pass. |
-| **Pass key** (`aos_key`) | The first whole Unix second at or above the horizon. Seeds the per-pass random draws. |
+| **Pass key** (`aos_key`) | The whole Unix second nearest the AOS. Seeds the per-pass random draws. |
 | **Truth** | Analytic ground truth (frequency, Doppler, level...) computed without rendering any samples. |
 | **Sink** | Where the uint8 stream goes: `wav`, `cu8`, `fft` (push sinks, fed piece by piece) or `rtl_tcp` (a serving sink, with clients). Listed under `sinks:`, driven by `assist run`. |
 | **Registry** | A table from names to classes (`registry.py`). There are three: signals, platforms, sinks. |
@@ -320,7 +320,7 @@ ASSIST/
 │   │
 │   ├── orbits/                  everything about where satellites are
 │   │   ├── elements.py          OMM/TLE readers, ElementStore, snapshot download (the only network code)
-│   │   ├── geometry.py          Skyfield evaluation, SplineGeometry (hourly cubic-spline blocks), passes
+│   │   ├── geometry.py          Skyfield and direct-SGP4 evaluation, SplineGeometry (hourly cubic-spline blocks), passes
 │   │   ├── synthetic.py         Kepler -> SGP4 satellite; solve a circular orbit for (AOS, max elevation)
 │   │   ├── perturb.py           make the true orbit differ from the published one
 │   │   └── catalog.py           `assist catalog`: what the tracker under test is given
@@ -524,7 +524,7 @@ Design consequences worth remembering:
 * **Nothing names a concrete signal, platform or sink class.** `schema`, `resolve`, `scene` and `runner` reach them through the registries (`signal_class`, `platform_class`, `sink_class`), which is why a plugin's class works wherever a core one does.
 
 * **`config.resolve` imports `emitters.link` and `orbits.*`** because resolving a *level* needs the link budget and resolving
-  an *orbit* needs Skyfield. That is why `resolve` is slow-ish (a synthetic pass solve takes a second or so) and why it
+  an *orbit* needs SGP4 and the element store. That is why `resolve` is slow-ish (a synthetic pass solve takes ~0.1 s) and why it
   is done only once.
 * **`profile/` is a separate world.** It borrows from the simulator (`orbits.geometry`/`elements`, `emitters.link`,
   `emitters.schedules`, `signals.base`, `engine.frontend`, `backend`, `rng`, `station`, `timebase`, `waterfall`), mostly so that it
@@ -1037,7 +1037,7 @@ A fixed draw order is what makes a slot's events reproducible. Changing the firs
 * `sample_at(t, fs)` -> nearest absolute sample index, **by integer microsecond arithmetic** (ties up).
 * `unix_to_time(t)` -> a Skyfield `Time`. It deliberately *does not* use `ts.utc(1970, 1, 1, 0, 0, t)` (that applies the 1970 leap-second offset and is 27 s off in 2026): it
   splits into whole days plus seconds of day so Skyfield looks up the leap seconds for the right date. Skyfield's built-in tables are used; **no download**.
-* `unix_to_time_fast(t)` swaps the IAU 2000A nutation series for the 8x cheaper IAU 2000B. Because station and satellite rotate with the same nutation, the station-to-satellite geometry changes by ~1e-8 m. The simulator uses the fast one; the profile tool the full one.
+* `unix_to_time_fast(t)` swaps the IAU 2000A nutation series for the 8x cheaper IAU 2000B. Because station and satellite rotate with the same nutation, the station-to-satellite geometry changes by ~1e-8 m. The simulator's geometry no longer goes through Skyfield at all (direct SGP4, [6.5](#65-geometry-for-the-simulator-splinegeometry)); the fast one remains for the synthetic-pass solver's cross-track check, the profile tool uses the full one.
 
 ### 6.2 Element sets (`orbits/elements.py`)
 
@@ -1082,7 +1082,7 @@ flowchart TD
     PICK --> LSQ
     subgraph LSQ["scipy least_squares on (RAAN, M)"]
         R1["build Kepler satellite"]
-        R2["measure_pass: Skyfield elevation on a 5 s grid +-30 min,<br/>brentq for AOS, bounded minimiser for culmination"]
+        R2["measure_pass: direct SGP4 elevation on a 5 s grid +-30 min,<br/>brentq for AOS, bounded minimiser for culmination"]
         R3["residuals:<br/>(AOS - wanted) / 0.1 s<br/>(signed zenith angle - wanted) / 0.005 deg"]
         R1 --> R2 --> R3 --> R1
     end
@@ -1097,12 +1097,17 @@ Afterwards the solved orbit is just a Kepler orbit stored in the scenario; nothi
 
 ### 6.5 Geometry for the simulator: `SplineGeometry`
 
-The renderer needs range, range rate, elevation, azimuth and off-nadir angle **1000 times per second per satellite** for hours. Calling Skyfield that often is too slow. So:
+The renderer needs range, range rate, elevation, azimuth and off-nadir angle **1000 times per second per satellite** for hours. Calling an orbit propagator that often is too slow. So:
 
 * Time is cut into **aligned one-hour blocks** (`BLOCK_S = 3600`, index `floor(t / 3600)`).
-* For each block, Skyfield evaluates the geometry at **every whole Unix second** from `-120 s` to `+3720 s` of the block (3841 samples; a 2-minute margin on each side so splines are valid at the edges).
+* For each block, the geometry is evaluated at **every whole Unix second** from `-120 s` to `+3720 s` of the block (3841 samples; a 2-minute margin on each side so splines are valid at the edges).
+  The samples come from **direct SGP4** (`sgp4_topocentric`), not Skyfield:
+  * `Satrec.sgp4_array` gives TEME positions at the UTC Julian date (kept as whole days + fraction, as Skyfield passes it);
+  * TEME is rotated to Earth-fixed axes by **GMST 1982 at UT1** (`gmst82`, sgp4's `gstime` vectorised, the Julian date in two parts). UT1 - UTC comes from Skyfield's built-in table **at every sample**, so a sample is a pure function of time and neighbouring blocks agree where they overlap (one value per block would step the station by ~1 cm at each boundary, ~27 degrees of phase at 2.25 GHz);
+  * the station is Skyfield's WGS84 position with geodetic east/north/up axes (`station_frame`); polar motion is ignored, as Skyfield does without a loaded table.
+  No precession or nutation is needed: the station-to-satellite geometry does not depend on which inertial frame it is computed in. Against full Skyfield (IAU 2000A) on 130 random catalog passes: range within 0.8 mm (LEO) / 4 cm (15 h deep-space passes), angles within 1e-6 deg; ~5x faster per block (4.4 ms against 21 ms, mostly the spline fit now). `tests/test_orbits.py` holds it to 1 m and 1e-2 deg.
 * **Cubic splines** are fitted to range, elevation, unwrapped azimuth and off-nadir angle.
-  **Range rate is the derivative of the range spline**, not Skyfield's velocity, so range and range rate are always consistent (the integral of Doppler matches the range phase).
+  **Range rate is the derivative of the range spline**, not SGP4's velocity, so range and range rate are always consistent (the integral of Doppler matches the range phase). SGP4's velocity is not exactly the derivative of its own position (up to ~3 cm/s, 0.2 Hz at 2.25 GHz).
 * The block grid does not depend on what was asked for, so **any window gives the same values** (random access). Up to 8 blocks are kept (LRU).
 * `geometry_ms(k_ms)` takes *integer Unix milliseconds* and forms the time inside the block as `(k - block*3_600_000)/1000` from integers, exact to ~1e-13 s. (Float Unix seconds resolve only ~0.24 us, a range error up to ~2 mm, i.e. a few mrad of phase at 137 MHz.)
 
@@ -1110,7 +1115,7 @@ The renderer needs range, range rate, elevation, azimuth and off-nadir angle **1
 
 ### 6.6 Passes and pass keys
 
-Each block records its **horizon crossings**: between consecutive whole seconds where `el >= horizon` flips, `brentq` on the spline refines the crossing time (to 1 ns), and the crossing remembers `key` = the first whole second on the new side.
+Each block records its **horizon crossings**: between consecutive whole seconds where `el >= horizon` flips, `brentq` on the spline refines the crossing time (to 1 ns), and the crossing remembers `key` = the whole second **nearest** the crossing. Nearest rather than "first whole second after": a synthetic pass is solved to rise within nanoseconds of a requested whole second, and "first after" would make its key a coin toss between two seconds (any numeric change, or another machine's libm, could flip it and redraw the zombie's oscillator). With "nearest" the flip points are at half-seconds, 0.5 s from any requested AOS.
 
 `SplineGeometry.passes(t0, t1)` returns **complete passes** (true AOS and LOS, never clipped to the window) overlapping `[t0, t1)`:
 
@@ -1119,7 +1124,7 @@ Each block records its **horizon crossings**: between consecutive whole seconds 
 3. pair them (rise, set); `_culmination` takes the best whole second and refines it with a bounded minimiser (searching relative to the lower bound, because bounded Brent's tolerance is *relative to |x|*, which is 27 s at Unix 1.8e9);
 4. `Pass(norad, name, aos, tca, los, max_el_deg, aos_key)`.
 
-**`aos_key`** (the first whole second at or above the horizon) identifies a pass **independently of the window that found it**. It is the integer in the RNG key `(source, emitter, "pass", aos_key)` that draws a zombie's per-pass frequency offset and drift sign, so the same pass always gets the same oscillator, however you slice time. It also anchors the drift term `drift * (t - aos_key)`.
+**`aos_key`** (the whole second nearest the AOS; up to 0.5 s before or after it) identifies a pass **independently of the window that found it**. It is the integer in the RNG key `(source, emitter, "pass", aos_key)` that draws a zombie's per-pass frequency offset and drift sign, so the same pass always gets the same oscillator, however you slice time. It also anchors the drift term `drift * (t - aos_key)`.
 
 The engine asks for passes **per UTC hour** and caches them (`EmitterRender._hour_passes`), see [9.8](#98-caches-prefetch-and-speed).
 
@@ -2043,7 +2048,7 @@ Per-event draws are added: `+ offset_hz` to the frequency, `+ level_db` to the l
 | `schema` | no | - | `Scenario.model_json_schema()` | - | stdout / file |
 | `validate` | yes | - | `_resolve` | scenario, includes, band, presets, profile cal files, elements | stdout (counts + hash) |
 | `resolve` | yes | - | `Resolved.pretty()` | same | canonical JSON (sorted, indented) |
-| `passes` | yes | `Scene` | `platform.passes` | + geometry (Skyfield) | table / CSV |
+| `passes` | yes | `Scene` | `platform.passes` | + geometry (SGP4) | table / CSV |
 | `truth` | yes | `Scene` | `truth.compute` | same | `truth.csv`/`jsonl` + `.events.*` |
 | `catalog` | yes | - | `catalog.entries/write` | element files | `.tle` / `.json` |
 | `run` (file sinks: `wav`, `cu8`, `fft`) | yes | `Scene`, `Renderer`, the sinks | `sinks.runner.run`: `Renderer.iter_u8` or `workers.iter_u8`, each piece to every sink | + profile arrays | IQ files / PNG + `run.json` |
@@ -2150,7 +2155,7 @@ Other `profile` commands: `labels` writes a stratified sample (~200) of the even
 
 ## 15. Tests and CI
 
-432 tests (`uv run pytest`). Most of them check a small set of properties:
+436 tests (`uv run pytest`). Most of them check a small set of properties:
 
 | Property | What is checked | Where |
 |---|---|---|
@@ -2211,25 +2216,25 @@ sources:
 
 **5. Scene.** One `SatellitePlatform` (`SplineGeometry`), one `Emitter`: `Carrier(rest 137 350 000 000 mHz, sigma 50 Hz, drift 0.2 Hz/s)`, `OnOff(40, 180, 27.82, 5 ms)`, `AmModel(7.5 s, 6 dB, 5.232)`.
 
-**6. The pass.** `SplineGeometry.passes`: AOS 12:01:00.0, TCA 12:08:37.4 (45.0 degrees), LOS 12:16:10.5, pass key `1793793661` (= 12:01:01, the first whole second above the horizon). The zombie's draws for this pass (stream `("z1", "carrier", "pass", 1793793661)`): offset +8.762 Hz, drift +0.2 Hz/s.
+**6. The pass.** `SplineGeometry.passes`: AOS 12:01:00.0, TCA 12:08:37.4 (45.0 degrees), LOS 12:16:10.5, pass key `1793793660` (= 12:01:00, the whole second nearest the AOS, which is the requested one). The zombie's draws for this pass (stream `("z1", "carrier", "pass", 1793793660)`): offset +41.093 Hz, drift -0.2 Hz/s.
 The on-intervals are every 220 s from 27.82 s into the hour: 12:03:07.8-12:03:47.8, 12:06:47.8-12:07:27.8, 12:10:27.8-12:11:07.8, 12:14:07.8-12:14:47.8 - four keyings during the pass.
 
 **7. Truth** at the middle of the third keying, 12:10:47.8Z:
 
 | elevation | range | range rate | `f_tx` | Doppler | `f_rx` | `rx_dbm` | C/N0 |
 |---|---|---|---|---|---|---|---|
-| 29.99 deg | 1437.7 km | +4445 m/s (receding) | 137 350 126.0 Hz | -2036.5 Hz | 137 348 089.5 Hz | -135.77 dBm | 34.2 dB-Hz |
+| 29.99 deg | 1437.6 km | +4445 m/s (receding) | 137 349 923.5 Hz | -2036.3 Hz | 137 347 887.2 Hz | -135.72 dBm | 34.3 dB-Hz |
 
-(`f_tx - 137 350 000 = 8.762 + 0.2 x 586.8 s = 126.1 Hz`; the carrier is 10.8 dB weaker than the zenith value because it is 30 degrees up and 1437 km away.)
+(`f_tx - 137 350 000 = 41.093 - 0.2 x 587.8 s = -76.5 Hz`; the carrier is 10.8 dB weaker than the zenith value because it is 30 degrees up and 1437 km away.)
 
 **8. The engine builds the `EmitterRender`.** `B = 0`, excursion bound `4344 Hz` (Doppler at `v_max` = 8.04 km/s: 3684 Hz, plus 6 x 50 plus 0.2 x 1800) -> `r >= 1.25 x 2 x 4344 = 10 861` -> candidates 10 900 (`L = 218 = 2 x 109`, not FFT-friendly), **11 000** (`L = 220 = 2^2 x 5 x 11`, fine). Coarse bin: `(137.35e6 - 137.0e6)/50 = 7000`, `f_bin = 137 350 000.0`, `limit_hz = 4400`.
 
-**9. One second of this carrier (chunk 1793794247, containing 12:10:47).** Control samples: 1021 values, amplitude 2.10e-7 to 2.11e-7 sqrt(mW) (x G = **1.72 counts**; the AM tumble modulates it between 1.72 and 0.86 counts), `cyc` falling by about 1.9 cycles per millisecond (i.e. the carrier sits ~1.9 kHz below the bin: Doppler -2.04 kHz plus the +126 Hz oscillator offset).
+**9. One second of this carrier (chunk 1793794247, containing 12:10:47).** Control samples: 1021 values, amplitude 2.10e-7 to 2.11e-7 sqrt(mW) (x G = **1.72 counts**; the AM tumble modulates it between 1.72 and 0.86 counts), `cyc` falling by about 2.1 cycles per millisecond (i.e. the carrier sits ~2.1 kHz below the bin: Doppler -2.04 kHz plus the -76.5 Hz oscillator offset).
 Narrow stream: 101 x 110 = 11 110 complex samples, all 100 blocks active. The signal `x` is 1 (CW), the envelope is the on_off plateau (1.0) times fade (1.0) times the AM gain; `nco` multiplies by `amp * env * exp(j 2 pi cyc)`.
 
 **10. Synthesis.** For each of the 100 blocks: Hann-window 220 samples, FFT_220, scale by `48000/220`, place into bins 7000-110 .. 7000+109 of the 48 000-bin spectrum (with `(-1)^(7000 b) = +1`, since 7000 is even), multiply by `H_rx`, IFFT_48000, overlap-add 24 000 samples apart. (With 40 other emitters this would be one IFFT per block, not 41.)
 
-**11. Noise and ADC.** Philox noise for the 100 hops, shaped by the 513-tap FIR; sum; `u = clip(rint(127.5 + 8.2077e6 x y), 0, 255)`. The resulting second: I mean 127.49, standard deviation **26.70** - the carrier (1.7 counts) is far below the noise in any one sample. Its C/N0 is 36.4 dB-Hz before the AM tumble (34.2 dB-Hz at 12:10:47.8, where the tumble takes 2.2 dB off), so a 1-second FFT shows it about 36 dB above the noise of a single 1 Hz bin - found by integration, exactly as a real zombie would be.
+**11. Noise and ADC.** Philox noise for the 100 hops, shaped by the 513-tap FIR; sum; `u = clip(rint(127.5 + 8.2077e6 x y), 0, 255)`. The resulting second: I mean 127.49, standard deviation **26.70** - the carrier (1.7 counts) is far below the noise in any one sample. Its C/N0 is 36.4 dB-Hz before the AM tumble (34.3 dB-Hz at 12:10:47.8, where the tumble takes 2.2 dB off), so a 1-second FFT shows it about 36 dB above the noise of a single 1 Hz bin - found by integration, exactly as a real zombie would be.
 
 **12. Output.** 4 800 000 bytes appended to the WAV (or sent to the socket), the same bytes whichever window or worker rendered it.
 
@@ -2511,7 +2516,7 @@ instead:
 | cyc | carrier phase in cycles | float64, reduced mod 1 |
 | mHz | millihertz (frequency quantum) | 1e-3 Hz |
 | AOS / TCA / LOS | pass start / culmination / end | Unix seconds |
-| `aos_key` | first whole second at or above the horizon | integer Unix second |
+| `aos_key` | the whole second nearest the AOS | integer Unix second |
 | hour slot | `floor(t / 3600)`, the unit of schedule events and geometry blocks | integer |
 | chunk | `floor(t)` for the engine's 1 s unit | integer |
 | OMM | Orbit Mean-Elements Message (CCSDS), the element-set format | CSV / JSON |

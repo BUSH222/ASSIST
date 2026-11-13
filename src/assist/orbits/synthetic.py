@@ -2,7 +2,8 @@
 
 A synthetic pass is a circular orbit (e = 0, argument of perigee 0) with the requested altitude and inclination,
 epoch at the requested AOS. RAAN and mean anomaly are seeded from spherical geometry, then refined with
-scipy.optimize.least_squares on the AOS-time and max-elevation errors measured with Skyfield.
+scipy.optimize.least_squares on the AOS-time and max-elevation errors measured with direct SGP4 (the evaluator the
+simulator's geometry is sampled with).
 """
 
 import math
@@ -15,7 +16,7 @@ from sgp4.api import WGS72, Satrec
 from skyfield.api import EarthSatellite
 from skyfield.sgp4lib import theta_GMST1982
 
-from assist.orbits.geometry import station_position, topocentric
+from assist.orbits.geometry import sgp4_topocentric, station_frame, station_position
 from assist.timebase import format_iso, timescale, unix_to_time, unix_to_time_fast
 
 if TYPE_CHECKING:
@@ -127,9 +128,13 @@ def _seeds(req: PassRequest, station: Station, horizon_deg: float) -> list[tuple
     return out
 
 
-def _el_fn(sat: EarthSatellite, station: Station) -> Callable[[np.ndarray | float], np.ndarray]:
+def _el_fn(sat: EarthSatellite, station: Station, near_unix: float) -> Callable[[np.ndarray | float], np.ndarray]:
+    """Elevation from direct SGP4, the evaluator the simulator's geometry samples come from."""
+    model, frame, t0 = sat.model, station_frame(station), math.floor(near_unix)
+
     def el(t: np.ndarray | float) -> np.ndarray:
-        return topocentric(sat, station, np.atleast_1d(np.asarray(t, dtype=np.float64)), fast=True).el_deg
+        dt_s = np.atleast_1d(np.asarray(t, dtype=np.float64)) - t0
+        return sgp4_topocentric(model, frame, t0, dt_s).el_deg
 
     return el
 
@@ -137,12 +142,12 @@ def _el_fn(sat: EarthSatellite, station: Station) -> Callable[[np.ndarray | floa
 def measure_pass(
     sat: EarthSatellite, station: Station, horizon_deg: float, near_unix: float
 ) -> tuple[float, float, float]:
-    """(AOS, max elevation, cross-track sign) of the pass rising nearest `near_unix` (direct Skyfield).
+    """(AOS, max elevation, cross-track sign) of the pass rising nearest `near_unix` (direct SGP4).
 
     The sign is +1 when the station lies on the orbit-normal side of the track at culmination (r x v points
     towards it), -1 otherwise.
     """
-    el = _el_fn(sat, station)
+    el = _el_fn(sat, station, near_unix)
     grid = near_unix + np.arange(-1800.0, 1801.0, 5.0)
     e = el(grid) - horizon_deg
     rising = np.flatnonzero((e[:-1] < 0) & (e[1:] >= 0))

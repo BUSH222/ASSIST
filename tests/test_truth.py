@@ -6,6 +6,7 @@ ubuntu must reproduce it byte for byte.
 
 import io
 import json
+import math
 import os
 from pathlib import Path
 
@@ -80,7 +81,7 @@ def test_zombie_truth_follows_the_carrier_model(scene: Scene) -> None:
     z = scene.source("z1").emitters[0]
     (p,) = z.platform.passes(scene.t_start, scene.t_end)
     assert p.aos_key is not None
-    t = np.arange(float(p.aos_key), p.los, 1.0)
+    t = np.arange(float(math.ceil(p.aos)), p.los, 1.0)  # the key may be up to 0.5 s before AOS
     tr = z.truth(t, 1.0)
     off, drift = z.carrier.pass_terms(int(p.aos_key))
     np.testing.assert_allclose(tr.f_tx_hz - z.carrier.rest_mhz / 1000, off / 1000 + drift * (t - p.aos_key), atol=1e-6)

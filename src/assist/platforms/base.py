@@ -79,7 +79,7 @@ class Platform(ABC):
     @abstractmethod
     def passes(self, t0: float, t1: float) -> list[Pass]:
         """Visibility windows overlapping [t0, t1), each whole and with an `aos_key` that does not depend on the
-        window asked for."""
+        window asked for (satellites: the whole Unix second nearest the AOS)."""
 
     def geometry_ms(self, k_ms: np.ndarray) -> Geometry:
         """Geometry at integer Unix milliseconds (the renderer's control grid). Override to form the time from the
