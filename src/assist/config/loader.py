@@ -29,7 +29,18 @@ EXCLUSIVE = (
     {"norad", "kepler", "synthetic_pass"},
     {"freq_hz", "channel"},
 )
-SOURCE_KEYS = {"id", "preset", "platform", "name", "orbit", "in_catalog", "catalog_norad", "channels", "emitters"}
+SOURCE_KEYS = {
+    "id",
+    "preset",
+    "platform",
+    "platform_params",
+    "name",
+    "orbit",
+    "in_catalog",
+    "catalog_norad",
+    "channels",
+    "emitters",
+}
 EMITTER_KEYS = {
     "id",
     "enabled",
@@ -157,9 +168,14 @@ def parse_path(path: str) -> list[str | tuple[str]]:
     return out
 
 
+def _keyed(x: Any, sel: str) -> bool:
+    """A one-key mapping {sel: ...}, as the items of `sinks:` are."""
+    return isinstance(x, dict) and len(x) == 1 and "id" not in x and sel in x
+
+
 def _select(lst: list[Any], sel: str, path: str) -> int:
     for i, x in enumerate(lst):
-        if isinstance(x, dict) and str(x.get("id")) == sel:
+        if (isinstance(x, dict) and str(x.get("id")) == sel) or _keyed(x, sel):
             return i
     if sel.isdigit() and int(sel) < len(lst):
         return int(sel)
@@ -179,8 +195,17 @@ def apply_set(doc: dict[str, Any], assignment: str) -> None:
         if isinstance(k, tuple):
             if not isinstance(node, list):
                 raise ConfigError(f"{path}: [{k[0]}] applied to a non-list")
+            if keys[0] == "sinks" and i == 1 and not any(_keyed(x, k[0]) for x in node) and not k[0].isdigit():
+                node.append({k[0]: {}})  # a sink the scenario does not list yet: added with its defaults
             j = _select(node, k[0], path)
-            if last:
+            if _keyed(node[j], k[0]):  # sinks[wav]: the settings under the item's one key
+                if last:
+                    node[j][k[0]] = value
+                else:
+                    if node[j][k[0]] is None:
+                        node[j][k[0]] = {}
+                    node = node[j][k[0]]
+            elif last:
                 node[j] = value
             else:
                 node = node[j]
@@ -192,9 +217,9 @@ def apply_set(doc: dict[str, Any], assignment: str) -> None:
             else:
                 nxt = keys[i + 1]
                 if k not in node:
-                    if isinstance(nxt, tuple):
+                    if isinstance(nxt, tuple) and k != "sinks":
                         raise ConfigError(f"{path}: {k!r} does not exist")
-                    node[k] = {}
+                    node[k] = [] if isinstance(nxt, tuple) else {}
                 node = node[k]
 
 

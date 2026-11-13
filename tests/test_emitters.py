@@ -68,7 +68,7 @@ def test_band_calibrations_match_profile() -> None:
 
 def test_carrier_per_pass_terms_are_keyed_by_aos() -> None:
     rng = KeyedRng(5)
-    c = Carrier("z1", "carrier", to_mhz(137.5e6), 50.0, 0.2, rng)
+    c = Carrier(to_mhz(137.5e6), 50.0, 0.2, rng.scope("z1", "carrier"))
     t = T0 + np.array([10.0, 20.0, 5000.0])
     keys = np.array([int(T0), int(T0), int(T0) + 4000])
     base, small = c.f_tx(t, keys)
@@ -77,7 +77,7 @@ def test_carrier_per_pass_terms_are_keyed_by_aos() -> None:
     assert small[1] - small[0] == pytest.approx(drift0 * 10.0)
     assert abs(drift0) == 0.2
     # A fresh carrier (another window) draws the same terms for the same pass
-    c2 = Carrier("z1", "carrier", to_mhz(137.5e6), 50.0, 0.2, KeyedRng(5))
+    c2 = Carrier(to_mhz(137.5e6), 50.0, 0.2, KeyedRng(5).scope("z1", "carrier"))
     assert c2.pass_terms(int(T0) + 4000) == c.pass_terms(int(T0) + 4000)
     # Statistics over many passes: offset ~ N(0, 50 Hz), drift sign 50/50
     terms = [c.pass_terms(int(T0) + 6000 * k) for k in range(2000)]
@@ -85,7 +85,7 @@ def test_carrier_per_pass_terms_are_keyed_by_aos() -> None:
     assert np.std(offs) == pytest.approx(50.0, rel=0.08)
     assert abs(np.mean([d > 0 for _, d in terms]) - 0.5) < 0.05
     # No oscillator: rest frequency only, below the horizon too
-    plain = Carrier("s", "e", to_mhz(137.9e6))
+    plain = Carrier(to_mhz(137.9e6))
     b, s = plain.f_tx(t, np.array([-1, 5, 7]))
     assert (b == to_mhz(137.9e6)).all() and (s == 0).all()
 
@@ -127,7 +127,7 @@ def test_duration_distributions() -> None:
 
 def test_exp_gaps_statistics_and_random_access() -> None:
     rng = KeyedRng(11)
-    sch = ExpGaps(rng, "bee", "lora", DurationDist("fixed", s=1.0), mean_gap_s=180.0, min_gap_s=20.0)
+    sch = ExpGaps(rng.scope("bee", "lora"), DurationDist("fixed", s=1.0), mean_gap_s=180.0, min_gap_s=20.0)
     ev = sch.events(T0, T0 + 30 * 86400)
     starts = np.array([e.start for e in ev])
     ends = np.array([e.end for e in ev])
@@ -135,19 +135,19 @@ def test_exp_gaps_statistics_and_random_access() -> None:
     assert gaps.min() >= 20.0 - 1e-9  # also across hour slots
     assert np.mean(gaps) == pytest.approx(180.0, rel=0.05)
     # Any window gives the same events: a fresh schedule queried over a sub-window
-    sub = ExpGaps(KeyedRng(11), "bee", "lora", DurationDist("fixed", s=1.0)).events(T0 + 5000.5, T0 + 9000)
+    sub = ExpGaps(KeyedRng(11).scope("bee", "lora"), DurationDist("fixed", s=1.0)).events(T0 + 5000.5, T0 + 9000)
     assert sub == [e for e in ev if e.end > T0 + 5000.5 and e.start < T0 + 9000]
     e0 = ev[0]
     env = sch.envelope(np.array([e0.start - 0.5, e0.start, (e0.start + e0.end) / 2, e0.end]))
     np.testing.assert_array_equal(env, [0, 1, 1, 0])
     with pytest.raises(ValueError, match="min_gap_s"):
-        ExpGaps(rng, "a", "b", DurationDist("fixed", s=30.0), 180.0, 20.0)
+        ExpGaps(rng.scope("a", "b"), DurationDist("fixed", s=30.0), 180.0, 20.0)
 
 
 def test_poisson_events_rate_curve_and_random_access() -> None:
     curve = [10.0] * 12 + [40.0] * 12
     sch = PoissonEvents(
-        KeyedRng(3), "vdl", "ch1", DurationDist("lognormal", median_s=4.0, sigma=0.74, max_s=600), curve
+        KeyedRng(3).scope("vdl", "ch1"), DurationDist("lognormal", median_s=4.0, sigma=0.74, max_s=600), curve
     )
     day0 = np.floor(T0 / 86400) * 86400
     ev = sch.events(day0, day0 + 40 * 86400)
@@ -155,12 +155,12 @@ def test_poisson_events_rate_curve_and_random_access() -> None:
     per_h = np.bincount(hours, minlength=24) / 40
     assert per_h[:12].mean() == pytest.approx(10.0, rel=0.1)
     assert per_h[12:].mean() == pytest.approx(40.0, rel=0.1)
-    sub = PoissonEvents(KeyedRng(3), "vdl", "ch1", sch.duration, curve).events(
+    sub = PoissonEvents(KeyedRng(3).scope("vdl", "ch1"), sch.duration, curve).events(
         day0 + 3 * SLOT_S + 7, day0 + 9 * SLOT_S
     )
     assert sub == [e for e in ev if e.end > day0 + 3 * SLOT_S + 7 and e.start < day0 + 9 * SLOT_S]
     # Different emitters (keys) give different events
-    other = PoissonEvents(KeyedRng(3), "vdl", "ch2", sch.duration, curve).events(day0, day0 + 86400)
+    other = PoissonEvents(KeyedRng(3).scope("vdl", "ch2"), sch.duration, curve).events(day0, day0 + 86400)
     assert other != [e for e in ev if e.start < day0 + 86400]
 
 

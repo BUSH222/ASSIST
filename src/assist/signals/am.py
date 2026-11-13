@@ -20,7 +20,7 @@ import numpy as np
 from pydantic import Field, model_validator
 from scipy.signal import firwin2
 
-from assist.signals.base import Signal, SignalParams
+from assist.signals.base import Signal, SignalParams, register_signal
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -75,8 +75,8 @@ def syllables(g: np.random.Generator, dur: float) -> np.ndarray:
     return np.array(out, dtype=np.float64).reshape(-1, 3)
 
 
+@register_signal("am")
 class AM(Signal):
-    kind = "am"
     Params = AmParams
     mode = "event"
 
@@ -120,7 +120,7 @@ class AM(Signal):
 
     def envelope(self, ev: Event, t: np.ndarray) -> np.ndarray:
         """Syllable envelope (0..1) at times t (s from the event start)."""
-        g = self.keys.rng.stream(self.keys.source_id, self.keys.emitter_id, "syllables", round(ev.start * US))
+        g = self.keys.stream("syllables", round(ev.start * US))
         syl = syllables(g, ev.end - ev.start)
         env = np.zeros(t.shape)
         if len(syl) == 0 or t.size == 0:

@@ -77,7 +77,7 @@ def read_events(path: Path) -> list[dict[str, Any]]:
 
 def stratified_sample(events: list[dict[str, Any]], total: int = 200, seed: int = 0) -> list[dict[str, Any]]:
     """Up to `total` events, at least min(total/classes, n_class) per auto-label class, the rest proportional."""
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(seed)  # picks events for the label sheet; never feeds a render
     by: dict[str, list[dict[str, Any]]] = {}
     for e in events:
         by.setdefault(e["auto_label"], []).append(e)

@@ -1,4 +1,4 @@
-"""T-RTL (plan §10.1): rtl_tcp header, command parsing, fan-out, pacing; the `serve` command.
+"""T-RTL (plan §10.1): rtl_tcp header, command parsing, fan-out, pacing; the rtl_tcp sink of `assist run`.
 
 Most tests use a stub source whose sample n carries n mod 2^16 (I = low byte, Q = high byte), so continuity and
 chunk alignment can be read from the bytes. `test_pacing_60s` runs a real minute of stream.
@@ -310,7 +310,7 @@ def _free_port() -> int:
 
 @pytest.mark.usefixtures("_cwd")
 def test_serve_equals_render(tmp_path: Path) -> None:
-    """`serve` streams exactly the bytes `render` writes for the same window; the port comes from the sink."""
+    """The rtl_tcp sink streams exactly the bytes the cu8 sink writes for the same window; the port is the sink's."""
     port = _free_port()
     sc = tmp_path / "s.yaml"
     sc.write_text(
@@ -326,7 +326,16 @@ def test_serve_equals_render(tmp_path: Path) -> None:
     result: dict[str, Result] = {}
 
     def run_serve() -> None:
-        args = ["serve", str(sc), "--pacing", "unpaced", "--duration", "0.5s", "-o", str(tmp_path / "srv")]
+        args = [
+            "run",
+            str(sc),
+            "--set",
+            "sinks[rtl_tcp].pacing=unpaced",
+            "--duration",
+            "0.5s",
+            "-o",
+            str(tmp_path / "srv"),
+        ]
         result["r"] = runner.invoke(app, args)
 
     th = threading.Thread(target=run_serve)
@@ -347,16 +356,20 @@ def test_serve_equals_render(tmp_path: Path) -> None:
     res = result["r"]
     assert res.exit_code == 0, res.output
     assert data[:12] == dongle_info()
-    rr = runner.invoke(app, ["render", str(sc), "-o", str(tmp_path / "ren"), "--format", "cu8", "--duration", "0.5s"])
+    rr = runner.invoke(app, ["run", str(sc), "--sink", "cu8", "-o", str(tmp_path / "ren"), "--duration", "0.5s"])
     assert rr.exit_code == 0, rr.output
     (cu8,) = (tmp_path / "ren").glob("*.cu8")
     assert data[12:] == cu8.read_bytes()
     info = json.loads((tmp_path / "srv" / "run.json").read_text())
-    assert info["status"] == "complete" and info["render"]["format"] == "rtl_tcp"
-    assert info["serve"] == {"host": "127.0.0.1", "port": port, "pacing": "unpaced", "live": False, "lookahead_s": 1.0}
-    assert info["stream"]["samples"] == FS // 2 and info["stream"]["clients"] == 1
+    (sink,) = info["sinks"]
+    assert info["status"] == "complete" and sink["kind"] == "rtl_tcp" and info["files"] == []
+    assert sink["params"] == {"host": "127.0.0.1", "port": port, "pacing": "unpaced", "lookahead": 1.0}
+    stream = sink["info"].pop("stream")
+    assert sink["info"] == {"host": "127.0.0.1", "port": port, "pacing": "unpaced", "live": False, "lookahead_s": 1.0}
+    assert stream["samples"] == FS // 2 and stream["clients"] == 1 and stream["stalls"] == 0
 
 
+@pytest.mark.usefixtures("_cwd")
 def test_serve_rejects_bad_pacing() -> None:
-    r = runner.invoke(app, ["serve", "scenarios/zombie_single.yaml", "--pacing", "fast"])
-    assert r.exit_code == 2
+    r = runner.invoke(app, ["run", "tests/fixtures/scenario_basic.yaml", "--set", "sinks[rtl_tcp].pacing=fast"])
+    assert r.exit_code == 2 and "pacing" in r.output

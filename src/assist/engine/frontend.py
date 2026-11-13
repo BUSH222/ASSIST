@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import ModuleType
 
-    from assist.rng import KeyedRng
+    from assist.rng import RngScope
 
 FIR_TAPS = 513
 PROFILE_FFT = 16384
@@ -130,7 +130,7 @@ class Frontend:
         fs: int,
         hop: int,
         m: int,
-        rng: KeyedRng,
+        scope: RngScope,
         dsp: ModuleType | None = None,
     ) -> None:
         if dsp is None:
@@ -150,7 +150,7 @@ class Frontend:
         self.noise_sub = hop // split
         self.ols_size = next_smooth(self.noise_sub + self.n_hist)
         self.taps_f = np.asarray(sfft.fft(self.taps, self.ols_size), dtype=np.complex64)
-        self.key = rng.key64("noise")
+        self.key = scope.key64("noise")
         # Per-component noise sigma (sqrt(mW)) after the FIR, and the ADC gain that maps it to sigma_counts.
         self.noise_sigma = float(scale * np.sqrt(np.sum(np.abs(h) ** 2)))
         self.gain = spec.sigma_counts / self.noise_sigma

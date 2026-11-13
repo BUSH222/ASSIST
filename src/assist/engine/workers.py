@@ -8,12 +8,15 @@ control plane (geometry, link budget, narrow samples) is Python and holds the GI
 """
 
 import itertools
+import json
 import multiprocessing as mp
 import signal
 from collections import deque
 from concurrent.futures import Future, ProcessPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from assist import plugins
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -27,14 +30,17 @@ TASK_S = 4  # seconds of stream per task (4 chunks: the lead-in block costs ~1 %
 _renderer: Renderer | None = None
 
 
-def _init(canonical: str, base: str) -> None:
-    """Worker start-up: build the Renderer from the resolved scenario (canonical JSON)."""
+def _init(canonical: str, base: str, located: dict[tuple[str, str], str]) -> None:
+    """Worker start-up: build the Renderer from the resolved scenario (canonical JSON). The scenario's plugins are
+    loaded first (the schema needs their kinds), from the files the parent process found them in."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)  # Ctrl-C is the parent's to handle
     from assist.config import schema as S
     from assist.engine.render import Renderer
     from assist.engine.scene import Scene
 
     global _renderer
+    plugins.remember(located)
+    plugins.activate(json.loads(canonical).get("plugins"), (Path(base),))
     _renderer = Renderer(Scene(S.Scenario.model_validate_json(canonical)), Path(base))
 
 
@@ -65,7 +71,7 @@ class RenderPool:
             max_workers=self.workers,
             mp_context=mp.get_context("spawn"),
             initializer=_init,
-            initargs=(canonical, str(base)),
+            initargs=(canonical, str(base), plugins.located()),
         )
 
     def iter_u8(self, n0: int, n: int) -> Iterator[np.ndarray]:

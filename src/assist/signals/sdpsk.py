@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, override
 import numpy as np
 from pydantic import Field
 
+from assist.signals.base import register_signal
 from assist.signals.pulse import ShapedParams, ShapedSignal, unpack
 
 if TYPE_CHECKING:
@@ -29,8 +30,8 @@ class SdpskParams(ShapedParams):
     sps: int = Field(8, ge=2)
 
 
+@register_signal("sdpsk")
 class SDPSK(ShapedSignal):
-    kind = "sdpsk"
     Params = SdpskParams
 
     def __init__(self, params: SignalParams, keys: Keys, dsp: ModuleType) -> None:

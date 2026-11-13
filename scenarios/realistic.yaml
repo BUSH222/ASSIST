@@ -18,7 +18,7 @@
 # From the repository root:
 #   uv run assist passes scenarios/realistic.yaml
 #   uv run assist truth  scenarios/realistic.yaml -o out/realistic/truth.csv
-#   uv run assist render scenarios/realistic.yaml -o out/realistic --format cu8     # 20 min = 5.8 GB
+#   uv run assist run scenarios/realistic.yaml --sink cu8 -o out/realistic     # 20 min = 5.8 GB
 version: 1
 seed: 21
 clock: {start: "2026-11-03T09:32:24Z", duration: 20min}

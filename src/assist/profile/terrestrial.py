@@ -214,6 +214,7 @@ def simulated_rail_fraction(power_counts2: float, sigma: float, kind: str = "d8p
     """Rail fraction of bursts of `kind` (d8psk or gfsk with transition probability tp) at this mean power plus
     Gaussian noise of sigma per component."""
     x = _burst_samples(kind, tp) * math.sqrt(power_counts2)
+    # A fixed seed of the fitting tool, not of any scenario: the fit lands in the profile, never in a render.
     n = np.random.default_rng(0).normal(0, sigma, (2, len(x)))
     v = np.concatenate([x.real + n[0], x.imag + n[1]])
     return float(np.mean(np.abs(v) >= RAIL))

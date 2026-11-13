@@ -1,6 +1,6 @@
 # What the station sees, live: a complete 137 MHz sky streamed over rtl_tcp.
 #
-#   uv run assist serve scenarios/realtime.yaml --lookahead 4s   # rtl_tcp on 127.0.0.1:1234, wall-clock time, Ctrl-C stops
+#   uv run assist run scenarios/realtime.yaml   # rtl_tcp on 127.0.0.1:1234, wall-clock time, Ctrl-C stops
 #   uv run assist passes scenarios/realtime.yaml --to +6h    # which satellites rise, and when
 #   uv run assist truth  scenarios/realtime.yaml -o out/realtime/truth.csv --to +30min
 # SDR++: source "RTL-TCP", host 127.0.0.1, port 1234, sample rate 2.4 MHz (the stream is fixed at 137.000 MHz).
@@ -26,8 +26,8 @@
 # The 138.1104 MHz carrier of the included environment is switched off below; delete the `carrier-138` entry to get it.
 # Element sets: `elements: {latest: true}` uses today's snapshots in elements/ and downloads them when missing (network);
 # `latest_existing: true` takes the newest ones already there. Passes need recent elements to be where the real ones are.
-# With ~50 sources the first second of the stream takes a couple of seconds to prepare; `--lookahead 4s` gives the
-# server that head start (without it the first seconds are late once, then the stream runs on time). One core renders
+# With ~50 sources the first second of the stream takes a couple of seconds to prepare; `lookahead: 4s` in the
+# rtl_tcp sink below gives the server that head start (without it the first seconds are late once, then the stream runs on time). One core renders
 # this scenario at about 7x real time (`assist bench scenarios/realtime.yaml` measures it).
 version: 1
 seed: 137
@@ -36,7 +36,7 @@ profile: profiles/vhf137
 elements: {latest: true}   # today's active + satnogs snapshots in elements/, downloaded if missing
 include: [bands/vhf137/terrestrial_default.yaml]
 sinks:
-  - rtl_tcp: {port: 1234}
+  - rtl_tcp: {port: 1234, lookahead: 4s}
 
 sources:
   # --- terrestrial: everything else comes from the include ---

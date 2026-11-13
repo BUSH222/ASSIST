@@ -6,8 +6,9 @@
 - **Rows:** a row is the mean of |FFT|^2 over `avg_count = max(1, round(row_seconds * fs / width))` consecutive,
   non-overlapping `width`-point FFTs (Nuttall window, fftshifted, float64 sums), so a row lasts
   `avg_count * width / fs` seconds, which is `row_seconds` to within one FFT. The image is `width` columns (low to
-  high frequency) by `floor(duration * fs / row_samples)` rows (oldest at the top): its height is derived, and
-  `duration` is required, from the scenario or from the command line; the sink never runs open-ended.
+  high frequency) by `floor(duration * fs / row_samples)` rows (oldest at the top): its height is derived.
+  `duration` is the sink's own limit; the stream of the run (`--duration`, else the scenario clock) is the other,
+  and the shorter of the two applies, so the sink never runs open-ended.
 - **Pixels:** `clip((10*log10(mean + 1e-12) - min_db) / (max_db - min_db) * 255, 0, 255)`, truncated to uint8, from
   IQ scaled as (u - 127.5) / 127.5. Power is scaled by 16384 / width, so a given dB means the same for any width
   (and equals the capture script's, which uses 16384).
@@ -16,14 +17,17 @@
   run if it is shorter) minus 5, and `max_db = min_db + 30`. Those rows are part of the image.
 """
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, override
 
 import numpy as np
 from PIL import Image
+from pydantic import Field, model_validator
 from scipy.fft import fft
 from scipy.signal.windows import nuttall
 
+from assist.sinks.base import Sink, SinkContext, SinkParams, register_sink
+from assist.sinks.wavfile import OutFile
 from assist.timebase import parse_duration
 
 if TYPE_CHECKING:
@@ -48,7 +52,8 @@ class FftSpec:
 
     @staticmethod
     def from_dict(cfg: dict[str, Any] | None, duration: str | float | None = None) -> FftSpec:
-        """Validate the sink's mapping; `duration` (e.g. from --duration) overrides the one in the mapping."""
+        """Validate the sink's mapping; `duration` overrides the one in the mapping. Without either the spec has no
+        duration yet: the sink takes the length of the stream it is given (`limited`)."""
         cfg = cfg or {}
         bad = sorted(set(cfg) - KEYS)
         if bad:
@@ -62,10 +67,8 @@ class FftSpec:
         if not row_seconds > 0:
             raise ValueError("fft row_seconds must be positive")
         raw = duration if duration is not None else cfg.get("duration")
-        if raw is None:
-            raise ValueError("the fft sink needs a duration (sink key `duration` or --duration)")
-        dur = parse_duration(raw)
-        if not dur > 0:
+        dur = None if raw is None else parse_duration(raw)
+        if dur is not None and not dur > 0:
             raise ValueError("fft duration must be positive")
         lo, hi = cfg.get("min_db"), cfg.get("max_db")
         if (lo is None) != (hi is None):
@@ -77,6 +80,10 @@ class FftSpec:
                 raise ValueError(f"fft max_db ({hi}) must be above min_db ({lo})")
             return FftSpec(width, row_seconds, dur, float(lo), float(hi))
         return FftSpec(width, row_seconds, dur)
+
+    def limited(self, seconds: float) -> FftSpec:
+        """The spec for a stream of `seconds`: its own duration, or the stream's when that is shorter (or unset)."""
+        return replace(self, duration=seconds if self.duration is None else min(self.duration, seconds))
 
     def avg_count(self, fs: int) -> int:
         return max(1, round(self.row_seconds * fs / self.width))
@@ -193,3 +200,81 @@ class WaterfallSink:
             "max_db": self.max_db,
             "levels": "given" if self.spec.min_db is not None else "calibrated",
         }
+
+
+class FftParams(SinkParams):
+    width: int = Field(REF_WIDTH, description="FFT size and image width: a power of two from 64 to 1048576.")
+    row_seconds: float = Field(1.0, description="Seconds of stream per image row (strings like 250ms are accepted).")
+    duration: float | None = Field(
+        None, description="Plot at most this much stream, e.g. 10min (default: the whole stream of the run)."
+    )
+    min_db: float | None = Field(None, description="Level of black; with max_db, or neither (found from the data).")
+    max_db: float | None = Field(None, description="Level of white.")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _check(cls, v: Any) -> Any:
+        if not isinstance(v, dict):
+            return v
+        spec = FftSpec.from_dict(v)  # one set of rules and messages for the mapping
+        return {
+            "width": spec.width,
+            "row_seconds": spec.row_seconds,
+            "duration": spec.duration,
+            "min_db": spec.min_db,
+            "max_db": spec.max_db,
+        }
+
+
+@register_sink("fft")
+class FftSink(Sink):
+    """The waterfall PNG of the stream (see the module text)."""
+
+    Params = FftParams
+
+    def __init__(self, params: SinkParams, ctx: SinkContext) -> None:
+        super().__init__(params, ctx)
+        assert isinstance(params, FftParams) and ctx.n is not None
+        spec = FftSpec(params.width, params.row_seconds, params.duration, params.min_db, params.max_db)
+        self.w = WaterfallSink(spec.limited(ctx.n / ctx.fs), ctx.fs)
+        self.png = ctx.out / waterfall_name(ctx.fc_hz, ctx.n0 / ctx.fs, ctx.tz)
+        self._saved = True  # until the run ends, the planned file is what `files` reports
+
+    @override
+    def planned(self) -> int:
+        return self.w.n_samples
+
+    @override
+    def files(self) -> list[OutFile]:
+        return [OutFile(self.png, 0, self.w.n_samples, self.ctx.n0)] if self._saved else []
+
+    @override
+    def write(self, u8: np.ndarray) -> None:
+        self.w.write(u8)
+
+    def _save(self) -> None:
+        self._saved = self.w.rows > 0
+        if self._saved:
+            self.w.save(self.png)
+
+    @override
+    def close(self) -> None:
+        try:
+            self.w.close()
+        finally:
+            self._save()
+
+    @override
+    def abort(self) -> None:
+        self._save()
+
+    @override
+    def info(self) -> dict[str, Any]:
+        return self.w.info()
+
+    @override
+    def summary(self) -> str:
+        w = self.w
+        if w.min_db is None or w.max_db is None:
+            return f"fft: {w.rows}/{w.height} rows (level not yet calibrated)"
+        return f"fft: {w.rows}/{w.height} rows, {w.width} px wide, levels {w.min_db:.1f}..{w.max_db:.1f} dB"

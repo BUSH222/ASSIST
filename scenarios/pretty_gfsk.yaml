@@ -1,0 +1,28 @@
+# PRETTY (NORAD 58023): bursts of 38.4 kbaud GFSK on 137.78 MHz, one pass (AOS 09:52:46 UTC, 43 deg).
+# The signal kind `pretty_gfsk` is not part of ASSIST: it comes from the external module listed under `plugins:`
+# (one Python file, examples/plugins/pretty_gfsk.py). Only the plugins a scenario lists are loaded.
+# Burst lengths, gaps, modulation index and level are placeholders, not measurements of PRETTY.
+#   uv run assist passes scenarios/pretty_gfsk.yaml
+#   uv run assist truth  scenarios/pretty_gfsk.yaml -o out/pretty_gfsk/truth.csv
+#   uv run assist run scenarios/pretty_gfsk.yaml --sink cu8 -o out/pretty_gfsk --from +5min --duration 60s
+#   uv run assist run scenarios/pretty_gfsk.yaml -o out/pretty_gfsk                 # the fft sink below: a waterfall PNG
+version: 1
+seed: 58023
+clock: {start: "2026-11-03T09:52:00Z", duration: 13min}
+profile: profiles/vhf137
+elements:
+  files: [elements/active_2026-11-02.csv, elements/satnogs_2026-11-02.csv]
+plugins:
+  - path: examples/plugins/pretty_gfsk.py
+sinks:
+  - fft: {width: 16384, row_seconds: 0.25, duration: 13min}
+sources:
+  - id: pretty
+    orbit: {norad: 58023}
+    emitters:
+      - id: tm
+        signal: {kind: pretty_gfsk}
+        freq_hz: 137.78e6
+        schedule: {type: exp_gaps, mean_gap_s: 6, min_gap_s: 1}
+        level: {cn0_zenith_dbhz: 62}
+        pattern: qfh_poly

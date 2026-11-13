@@ -8,7 +8,7 @@ A *scenario* (a YAML file) describes the sky: which satellites are overhead and 
 ground stations are on the air, what interference the receiver itself makes, and what the noise floor looks like.
 From one scenario ASSIST can produce:
 
-- the **IQ stream** (`serve`, `render`, `fft`), and
+- the **IQ stream** (`run`: files, a waterfall image, or an rtl_tcp server), and
 - the **truth** (`truth`, `passes`, `catalog`): the exact frequency, Doppler shift, geometry and level of every signal
   at every moment, and the element sets a tracker should be given.
 
@@ -44,6 +44,7 @@ Payloads are random: the signals are realistic at the spectrum and symbol level,
    - [Includes, merging and overrides](#includes-merging-and-overrides)
    - [Random expressions](#random-expressions)
    - [Sinks](#sinks)
+   - [Plugins](#plugins)
    - [Bands and profiles](#bands-and-profiles)
 5. [The example scenarios](#the-example-scenarios)
 6. [Recipes](#recipes)
@@ -70,7 +71,7 @@ the including file first and to the package second.
 Serve the live "what my station sees" scenario to SDR++ (or any rtl_tcp client):
 
 ```sh
-uv run assist serve scenarios/realtime.yaml --lookahead 4s
+uv run assist run scenarios/realtime.yaml
 ```
 
 In SDR++ choose the **RTL-TCP** source, host `127.0.0.1`, port `1234`, sample rate `2.4 MHz`. The stream is fixed at
@@ -86,7 +87,7 @@ uv run assist passes   scenarios/realtime.yaml --to +6h
 Render ten minutes to a raw file and write the truth for the same window:
 
 ```sh
-uv run assist render scenarios/signal_tour.yaml -o out/tour --format cu8
+uv run assist run   scenarios/signal_tour.yaml --sink cu8 -o out/tour
 uv run assist truth  scenarios/signal_tour.yaml -o out/tour/truth.csv
 ```
 
@@ -102,29 +103,29 @@ clock start (`+7min`, `+90s`, `+2h`). A duration is `90s`, `10min`, `2h`, `1d` o
 | `validate SCENARIO` | Load, draw random values, validate and resolve. Prints the number of sources and emitters and the scenario hash. Exit code 2 on an error. |
 | `resolve SCENARIO [-o FILE]` | Write the **resolved** scenario: a self-contained canonical JSON in which every random draw, catalog element set, channel name, calibrated level and synthetic pass is filled in. A resolved file is itself a valid scenario and resolves to itself. |
 | `passes SCENARIO [--from T] [--to T] [-o CSV]` | Pass table (AOS, TCA, LOS, max elevation, azimuths, duration) of every satellite source. Without `-o`, a table on stdout. |
-| `truth SCENARIO -o FILE [--from T] [--to T] [--step 1s] [--format csv\|jsonl] [--platforms satellite,ground,local]` | Truth per step for every emitter, plus an event list (every burst with its frequency and strength). See [Outputs](#outputs). |
+| `truth SCENARIO -o FILE [--from T] [--to T] [--step 1s] [--format csv\|jsonl] [--platforms satellite,ground,...]` | Truth per step for every emitter, plus an event list (every burst with its frequency and strength). See [Outputs](#outputs). |
 | `catalog SCENARIO -o FILE [--sources-only]` | The element sets the tracker under test is given (`.tle` or `.json`): the whole element store, with sources marked `in_catalog: false` removed and synthetic sources with `in_catalog: true` added. `--sources-only` limits it to the scenario's sources. |
-| `render SCENARIO -o DIR [--from T] [--duration D] [--format wav\|cu8] [--rf64] [--force] [--workers N]` | Write the IQ stream to files plus `run.json`, in parallel worker processes (default: all CPUs). Default window: the whole scenario clock. |
-| `fft SCENARIO [-o DIR] [--from T] [--duration D] [--force] [--workers N]` | A waterfall PNG of the stream from the scenario's `fft` [sink](#sinks). |
-| `serve SCENARIO [--host H] [--port P] [--pacing realtime\|unpaced] [--from T] [--duration D] [--lookahead 1s] [-o DIR]` | Serve the stream over rtl_tcp until Ctrl-C (or `--duration`). |
+| `run SCENARIO [--sink NAME]... [-o DIR] [--from T] [--duration D] [--force] [--workers N]` | Run the scenario into its [sinks](#sinks): IQ files (`wav`, `cu8`), a waterfall PNG (`fft`) or an rtl_tcp server (`rtl_tcp`), plus `run.json`. |
 | `bench SCENARIO [--from T] [--duration 60s] [--workers N] [-o DIR]` | Render speed relative to real time on one worker and on N workers, without writing IQ. Also checks that both give identical streams. |
 | `schema [-o FILE]` | The JSON Schema of a resolved scenario. |
+| `plugins list [SCENARIO] [--plugin P]...` | The registered signals, platforms and sinks with their origin (`core`, or the plugin that provides them). With a scenario: what its `plugins:` list loads (version, API version, sha256, what each registers), without resolving or rendering anything. |
 | `fetch_omm [--feeds active,satnogs] [-o DIR]` | **Network.** Download `active_<date>.csv` and `satnogs_<date>.csv` from retlector.eu into `elements/`. Existing files are never overwritten. (`elements fetch` is the same command.) |
 | `profile build \| labels \| report \| terrestrial` | Extract the noise profile and the terrestrial environment from your own recordings (see [Bands and profiles](#bands-and-profiles)). |
 
 Notes on the individual commands:
 
-- **`serve`** speaks the rtl_tcp protocol (an R820T dongle header, then interleaved uint8 I/Q at 2.4 MS/s) to any
-  number of clients. A scenario whose clock starts `now` is served *live*: sample time equals wall time, so the sky
-  is the real one. Otherwise the stream starts at `--from` (default: the clock start) and is paced at real time.
-  The stream runs whether or not a client is connected. `--pacing unpaced` sends as fast as the clients read. The
-  address comes from `--host/--port`, then the scenario's `rtl_tcp` sink, then `127.0.0.1:1234`. The renderer works
-  `--lookahead` ahead of the wall clock; scenarios with many sources need a few seconds of head start at launch
-  (`--lookahead 4s`), after which the stream runs on time. Session statistics (stalls, clients) go to `out/serve/run.json`.
-- **`render`** with `--format wav` writes SDR++-style files named `baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav`
-  (station local time, `station.tz`), split every 10 minutes; `--rf64` writes one file instead. `--format cu8` writes
-  one raw file of interleaved unsigned 8-bit I/Q (for SDR++'s "Better File Source" plugin, or any raw reader). The stream
-  is 4.8 MB/s, 17 GB/hour. Existing files are not overwritten without `--force`.
+- **`run`** is the one command that produces IQ. *What* it produces is decided by the scenario's `sinks:` list;
+  `--sink NAME` (repeatable) picks among them, and a sink the scenario does not list runs with its default settings
+  (`--sink cu8` works on any scenario). Sink settings are never command-line options: change one with
+  `--set 'sinks[wav].rf64=true'`. Output goes to `-o` (default `out/<scenario name>`), and existing files are not
+  overwritten without `--force`.
+  - **File sinks** (`wav`, `cu8`, `fft`) render as fast as the machine allows, in parallel worker processes
+    (default: all CPUs), and several can share one run. The stream is `--from` (default: the clock start) for
+    `--duration` (default: to the end of the scenario clock); it is 4.8 MB/s, 17 GB/hour.
+  - **A serving sink** (`rtl_tcp`) runs alone, until Ctrl-C or `--duration`. A scenario whose clock starts `now` is
+    served *live*: sample time equals wall time, so the sky is the real one. Otherwise the stream starts at `--from`
+    (default: the clock start) and is paced at real time.
+  - A run is one or the other: with both kinds in `sinks:`, say which with `--sink`.
 - **`--workers`** only changes speed, never the bytes.
 - **`ASSIST_PURE=1`** runs the numpy reference kernels instead of the C++ ones (about 1.3x real time on 20 carriers
   instead of ~8x per core). The two agree to float rounding: rendered bytes differ by at most one count, in a few per million.
@@ -168,7 +169,7 @@ every level becomes a transmit power (satellites) or a received power (ground an
 | `version` | `1` | Schema version; must be `1`. |
 | `seed` | `0` | Non-negative integer. Every random draw is keyed by the seed and by *names* (source id, emitter id, absolute time), never by list position: adding or removing a source does not change any other source's draws. |
 | `clock.start` | `now` | ISO 8601 time **with a zone** (`"2026-11-01T16:39:00Z"`), or `now` (the current UTC second at resolve time). |
-| `clock.duration` | `3600` | Length of the scenario in seconds, or `90s`, `10min`, `2h`, `1d`. It is the default window of `render`, `truth` and `passes`; `serve` runs past it. |
+| `clock.duration` | `3600` | Length of the scenario in seconds, or `90s`, `10min`, `2h`, `1d`. It is the default window of `run` (file sinks), `truth` and `passes`; a serving sink runs past it. |
 | `station.lat`, `station.lon`, `station.alt_m` | 55.5, 37.1, 172 | Station position (degrees, metres). |
 | `station.file` | – | A station file with `station_lat`, `station_lon`, `altitude_m` (optionally `tz`). If neither `file` nor `lat`/`lon` is given, `samples/station.yaml` is read when it exists; otherwise the rounded default position above is used. Set the `station:` block explicitly for reproducible scenarios. |
 | `station.horizon_deg` | `0` | Elevation at which a satellite counts as visible. |
@@ -182,7 +183,8 @@ every level becomes a transmit power (satellites) or a received power (ground an
 | `elements.latest` | `false` | Use today's (UTC) `active_<date>.csv` and `satnogs_<date>.csv` from `elements/`; those missing are downloaded first, as `assist fetch_omm` does (network only then; if the download fails the newest existing files are used, with a warning). |
 | `elements.latest_existing` | `false` | Use the newest `active_*` and `satnogs_*` files already in `elements/`; no network. Exclusive with `latest`. Either flag adds its files before `elements.files`. |
 | `include` | – | A path or list of paths of YAML files merged underneath this one. |
-| `sinks` | `[]` | Output settings: `rtl_tcp` and `fft` entries. |
+| `sinks` | `[]` | Where `assist run` sends the stream: `wav`, `cu8`, `fft`, `rtl_tcp` entries, see [Sinks](#sinks). |
+| `plugins` | `[]` | External modules this scenario uses, see [Plugins](#plugins). |
 | `sources` | `[]` | The signal sources. |
 
 **`frontend`** is merged over the band's defaults, so you only give what you change:
@@ -415,11 +417,11 @@ sources:
 ```
 
 **`--set path=value`** overrides one field on the command line. The value is parsed as YAML (`137.35e6`, `true`, `[S-5, S-8]`); list
-items are addressed by `id` (or index); the override is applied before presets are expanded, so it can reach anything a source key can.
+items are addressed by `id` (or index), a sink by its name (`sinks[fft].width=4096`); the override is applied before presets are expanded, so it can reach anything a source key can.
 Quote it in the shell:
 
 ```sh
-uv run assist render scenarios/signal_tour.yaml -o out/x --format cu8 \
+uv run assist run scenarios/signal_tour.yaml --sink cu8 -o out/x \
   --set seed=2 --set 'sources[sat-cw].freq_hz=136.6e6' --set 'sources[voice].voice.enabled=false'
 ```
 
@@ -447,13 +449,27 @@ other sources. Change `seed` (or the source id) for a different draw. `assist re
 
 ### Sinks
 
-`sinks:` is a list of one-key mappings.
+`sinks:` is a list of one-key mappings, sink name to settings. `assist run` drives them; each sink may appear once.
 
 ```yaml
 sinks:
-  - rtl_tcp: {host: 127.0.0.1, port: 1234}     # used by `serve`; the command-line options win
-  - fft: {width: 16384, row_seconds: 1, duration: 1h, min_db: 20, max_db: 50}    # used by `fft`
+  - rtl_tcp: {port: 1234, lookahead: 4s}
+  - fft: {width: 16384, row_seconds: 1, duration: 1h, min_db: 20, max_db: 50}
+  - wav: {rf64: true}
 ```
+
+Settings are checked when the scenario is validated (an unknown key is an error) and their defaults are filled in.
+The sinks are not part of the scenario hash: the hash names what is rendered, not where it goes.
+
+`wav`: SDR++-style files named `baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav` (station local time, `station.tz`),
+split every 10 minutes.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `rf64` | false | One RF64 file of any length instead of the 10 minute splits. |
+
+`cu8`: one raw file of interleaved unsigned 8-bit I/Q (for SDR++'s "Better File Source" plugin, or any raw reader).
+No settings.
 
 `fft` (a waterfall PNG; the image is `width` columns by `duration / row_seconds` rows, oldest at the top):
 
@@ -461,8 +477,46 @@ sinks:
 |---|---|---|
 | `width` | 16384 | FFT size, a power of two from 64 to 2^20. Power is scaled so that a dB means the same for any width. |
 | `row_seconds` | 1 | Seconds per row (a row is the average of whole FFTs, so it is accurate to within one FFT). |
-| `duration` | – | Stream length to plot; required here or as `--duration`. |
+| `duration` | the run's stream | Plot at most this much. The run's own length (`--duration`, else the scenario clock) also applies; the shorter wins. |
 | `min_db`, `max_db` | automatic | Colour scale, both or neither. Automatic: from the mean level of the first 5 seconds. |
+
+`rtl_tcp`: the rtl_tcp protocol (an R820T dongle header, then interleaved uint8 I/Q at 2.4 MS/s) to any number of
+clients. The stream runs whether or not a client is connected.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `host` | 127.0.0.1 | Listen address. |
+| `port` | 1234 | TCP port. |
+| `pacing` | realtime | `realtime`, or `unpaced`: as fast as the clients read. |
+| `lookahead` | 1s | How far the renderer works ahead of the wall clock. Scenarios with many sources need a few seconds of head start at launch (`4s`), after which the stream runs on time. |
+
+Session statistics (stalls, clients) go to `run.json` in the output directory.
+
+### Plugins
+
+Signal kinds, platforms and sinks can come from outside the package. A scenario lists the modules it uses, and only
+those are loaded:
+
+```yaml
+plugins:
+  - path: examples/plugins/pretty_gfsk.py    # a file: looked up in the working directory, then next to the scenario
+  - module: mypkg.modems                     # an importable module
+    only: [psk8]                             # use only these of the names it registers
+    prefix: lab                              # register them as lab.<name> (resolves a name clash)
+  - psk8                                     # an entry point of the group `assist.plugins`, else a module name
+```
+
+A plugin is ordinary Python that imports `assist.api` and runs in the same process with full trust. It states the
+API version it was written for (`ASSIST_API = "1.0"`); one written for another major version, or for a newer minor
+than the installed `assist.api`, is refused with a message that says so. The examples in
+`examples/plugins/` are one file each: `pretty_gfsk.py` (a signal: 38.4 kbaud GFSK bursts), `jitter_platform.py`
+(a platform: a tethered beacon with Doppler) and `tcp_sink.py` (a sink: raw TCP in cu8, cs16 or cf32).
+
+The version, declared API version and (for a file) sha256 of each plugin are stored in the resolved scenario, so they
+are part of the scenario hash and of `run.json`: a changed plugin is a changed scenario. A scenario without plugins
+has no such entry, and its hash does not depend on the plugin machinery. `assist plugins list scenario.yaml` shows
+what a scenario would load. `assist.testing` has conformance checks (`check_signal`, `check_platform`, `check_sink`)
+for a plugin's own tests.
 
 ### Bands and profiles
 
@@ -558,13 +612,15 @@ sources:
 `t_utc, source_id, emitter_id, signal, norad, in_catalog, f_rest_hz, f_tx_hz, f_rx_hz, doppler_hz, el_deg, az_deg, range_km,
 range_rate_mps, rx_dbm, cn0_dbhz, active_fraction`. Event rows: `start, end, source_id, emitter_id, signal, f_rx_hz, rx_dbm, cn0_dbhz, params`
 (for event signals: spreading factor, payload length, per-event offset, ...). `--format jsonl` writes JSON lines, `--platforms`
-filters by `satellite`, `ground`, `local`.
+filters by platform (`satellite`, `ground`, `local`, or one from a plugin; default: all).
 
-**`render`** and **`serve`** write `run.json` next to their output: the resolved scenario and its hash, the package version and engine,
-the window as absolute sample indices, and per-file first-sample times. `run.json` is provenance, not truth; truth is always
-recomputed from the scenario. The scenario hash is the sha256 of the canonical resolved JSON.
+**`run`** writes `run.json` into its output directory: the resolved scenario and its hash, the package version and engine,
+the plugins it loaded, the window as absolute sample indices, the sinks that ran (their settings, and what each reports:
+file format, waterfall levels, stream statistics) and per-file first-sample times. `run.json` is provenance, not truth;
+truth is always recomputed from the scenario. The scenario hash is the sha256 of the canonical resolved JSON without
+its `sinks`.
 
-**`fft`** writes `waterfall_137000000Hz_HH-MM-SS_DD-MM-YYYY.png` and `run.json`.
+The `fft` sink writes `waterfall_137000000Hz_HH-MM-SS_DD-MM-YYYY.png`.
 
 Default output directories (`out/`, `temp/`) are gitignored.
 

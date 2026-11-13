@@ -2,8 +2,10 @@
 
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from assist import plugins
 from assist.config import schema as S
 from assist.config.resolve import pattern_of, t_sys_of
 from assist.emitters import link
@@ -19,22 +21,23 @@ from assist.emitters.schedules import (
     PoissonEvents,
     Schedule,
 )
-from assist.platforms.fixed import FixedPlatform
-from assist.platforms.satellite import SatellitePlatform
+from assist.platforms.base import Platform, PlatformContext, platform_class
 from assist.rng import KeyedRng
-from assist.signals.base import KINDS, event_maker, float_range
+from assist.signals.base import event_maker, float_range, get_kind
 from assist.station import Station
 from assist.timebase import parse_iso
 
 if TYPE_CHECKING:
     import numpy as np
 
+    from assist.rng import RngScope
+
 
 @dataclass
 class SceneSource:
     id: str
     config: S.Source
-    platform: SatellitePlatform | FixedPlatform
+    platform: Platform
     emitters: list[Emitter] = field(default_factory=list)
 
 
@@ -63,7 +66,7 @@ def make_maker(e: S.Emitter) -> EventMaker | None:
     this order from the slot stream: the frequency index of a multi-frequency emitter (only when there is a
     choice), the signal's parameters and duration (or the schedule's duration distribution), the per-event offset
     and level (M7)."""
-    mode = KINDS[e.signal.kind].mode
+    mode = get_kind(e.signal.kind).mode
     pe = e.per_event
     if mode == "continuous" and pe is None:
         return None
@@ -95,7 +98,7 @@ def make_maker(e: S.Emitter) -> EventMaker | None:
 
 
 def make_schedule(
-    sch: S.ScheduleConfig, rng: KeyedRng, sid: str, eid: str, maker: EventMaker | None = None
+    sch: S.ScheduleConfig, scope: RngScope, sid: str, eid: str, maker: EventMaker | None = None
 ) -> Schedule:
     if maker is not None and not isinstance(sch, S.ExpGapsSchedule | S.PoissonSchedule):
         raise ValueError(f"source {sid}: emitter {eid} has an event signal, so it needs exp_gaps or poisson_events")
@@ -106,14 +109,16 @@ def make_schedule(
             raise ValueError(f"source {sid}: on_off phase not resolved")
         return OnOff(sch.on_s, sch.off_s, sch.phase_s, sch.ramp_ms)
     if isinstance(sch, S.ExpGapsSchedule):
-        return ExpGaps(rng, sid, eid, _duration(sch.duration), sch.mean_gap_s, sch.min_gap_s, maker, sch.ramp_ms)
-    return PoissonEvents(rng, sid, eid, _duration(sch.duration), sch.rate_per_hour, maker, sch.ramp_ms, sch.min_gap_s)
+        return ExpGaps(scope, _duration(sch.duration), sch.mean_gap_s, sch.min_gap_s, maker, sch.ramp_ms)
+    return PoissonEvents(scope, _duration(sch.duration), sch.rate_per_hour, maker, sch.ramp_ms, sch.min_gap_s)
 
 
 class Scene:
     def __init__(self, sc: S.Scenario) -> None:
         if sc.clock.start == "now" or sc.assist_version is None:
             raise ValueError("Scene needs a resolved scenario (assist resolve)")
+        # The scenario's external modules (and no others) must be the active ones while it is built and rendered.
+        plugins.activate([p.model_dump(exclude_none=True) for p in sc.plugins], (Path.cwd(),))
         self.scenario = sc
         self.t_start = parse_iso(sc.clock.start)
         self.t_end = self.t_start + sc.clock.duration
@@ -125,10 +130,17 @@ class Scene:
         horizon = link.HorizonModel()
         self.sources: list[SceneSource] = []
         for src in sc.sources:
-            plat: SatellitePlatform | FixedPlatform = (
-                SatellitePlatform(src, self.station, st.horizon_deg)
-                if src.platform == "satellite"
-                else FixedPlatform(src, src.platform)
+            pcls = platform_class(src.platform)
+            plat = pcls.build(
+                PlatformContext(
+                    src.id,
+                    src.name or src.id,
+                    pcls.Params.model_validate(src.platform_params),
+                    self.station,
+                    st.horizon_deg,
+                    self.rng.scope("platform", src.platform, src.id),
+                    src,
+                )
             )
             ss = SceneSource(src.id, src, plat)
             for e in src.emitters:
@@ -136,13 +148,12 @@ class Scene:
                     continue
                 osc = e.oscillator
                 freqs = tuple(to_mhz(f) + to_mhz(e.offset_hz) for f in e.freqs_hz)
+                scope = self.rng.scope(src.id, e.id)
                 carrier = Carrier(
-                    src.id,
-                    e.id,
                     freqs[0],
                     osc.pass_offset_sigma_hz if osc else None,
                     osc.drift_hz_s if osc else None,
-                    self.rng,
+                    scope,
                 )
                 am = None
                 if e.am is not None:
@@ -158,7 +169,7 @@ class Scene:
                         src.id,
                         e.signal.kind,
                         carrier,
-                        make_schedule(e.schedule, self.rng, src.id, e.id, make_maker(e)),
+                        make_schedule(e.schedule, scope, src.id, e.id, make_maker(e)),
                         am,
                         math.nan if lv is None or lv.p_tx_dbw is None else lv.p_tx_dbw,
                         pattern_of(e.pattern),
@@ -171,7 +182,7 @@ class Scene:
                         None if lv is None else lv.rx_dbm,
                         0.0 if e.per_event is None else e.per_event.max_offset_hz,
                         e.per_event is not None,
-                        0.0 if src.platform != "satellite" else st.fade_s,
+                        st.fade_s if pcls.fades_at_horizon else 0.0,
                     )
                 )
             self.sources.append(ss)

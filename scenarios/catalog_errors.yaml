@@ -13,7 +13,7 @@
 #   uv run assist catalog scenarios/catalog_errors.yaml -o out/catalog.tle   # the whole store minus `unlisted`, plus 99001
 #   uv run assist catalog scenarios/catalog_errors.yaml -o out/sources.tle --sources-only
 #   uv run assist truth   scenarios/catalog_errors.yaml -o out/catalog_errors/truth.csv --step 10s
-#   uv run assist render  scenarios/catalog_errors.yaml -o out/catalog_errors --format cu8 --duration 20min
+#   uv run assist run scenarios/catalog_errors.yaml --sink cu8 -o out/catalog_errors --duration 20min
 version: 1
 seed: 9
 clock: {start: "2026-11-03T00:00:00Z", duration: 6h}

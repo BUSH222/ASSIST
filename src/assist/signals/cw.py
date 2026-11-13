@@ -4,15 +4,15 @@ from typing import override
 
 import numpy as np
 
-from assist.signals.base import Signal, SignalParams
+from assist.signals.base import Signal, SignalParams, register_signal
 
 
 class CwParams(SignalParams):
     pass
 
 
+@register_signal("cw")
 class CW(Signal):
-    kind = "cw"
     Params = CwParams
     constant = True
 

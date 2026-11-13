@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, override
 import numpy as np
 from pydantic import Field, model_validator
 
+from assist.signals.base import register_signal
 from assist.signals.pulse import ShapedParams, ShapedSignal, unpack
 
 if TYPE_CHECKING:
@@ -65,8 +66,8 @@ class OqpskBurstParams(ShapedParams):
         return (self.blocks, self.blocks) if isinstance(self.blocks, int) else self.blocks
 
 
+@register_signal("oqpsk_burst")
 class OQPSKBurst(ShapedSignal):
-    kind = "oqpsk_burst"
     Params = OqpskBurstParams
     q_delay = True
 

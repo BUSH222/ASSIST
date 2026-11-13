@@ -8,9 +8,9 @@
 #
 #   uv run assist validate scenarios/signal_tour.yaml
 #   uv run assist truth    scenarios/signal_tour.yaml -o out/tour/truth.csv    # also writes truth.events.csv
-#   uv run assist fft      scenarios/signal_tour.yaml                          # out/fft/waterfall_*.png (the fft sink below)
-#   uv run assist render   scenarios/signal_tour.yaml -o out/tour --format cu8
-#   uv run assist render   scenarios/signal_tour.yaml -o out/tour2 --format cu8 --set seed=2 --set 'sources[voice].voice.enabled=false'
+#   uv run assist run scenarios/signal_tour.yaml --sink fft             # out/signal_tour/waterfall_*.png (the fft sink below)
+#   uv run assist run scenarios/signal_tour.yaml --sink cu8 -o out/tour
+#   uv run assist run scenarios/signal_tour.yaml --sink cu8 -o out/tour2 --set seed=2 --set 'sources[voice].voice.enabled=false'
 version: 1
 seed: 1
 clock: {start: "2026-11-04T12:00:00Z", duration: 10min}

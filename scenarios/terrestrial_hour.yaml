@@ -6,8 +6,8 @@
 # Not modelled: the recording's clipping outside VDL bursts, the local interference until 16:46 UTC, DC, IM3.
 #
 # From the repository root:
-#   uv run assist serve scenarios/terrestrial_hour.yaml                  # rtl_tcp, paced from 16:39:00 (past date)
-#   uv run assist render scenarios/terrestrial_hour.yaml -o out/hour --format cu8 --duration 10min
+#   uv run assist run scenarios/terrestrial_hour.yaml --sink rtl_tcp                  # rtl_tcp, paced from 16:39:00 (past date)
+#   uv run assist run scenarios/terrestrial_hour.yaml --sink cu8 -o out/hour --duration 10min
 #   uv run assist truth scenarios/terrestrial_hour.yaml -o out/hour/truth.csv --to +10min   # every burst
 version: 1
 seed: 7

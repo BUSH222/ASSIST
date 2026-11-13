@@ -17,8 +17,11 @@ from pydantic import (
     model_validator,
 )
 
+from assist import plugins as plug
 from assist.emitters.link import QFH_COEFFS_DB
+from assist.platforms.base import check_platform_params, platform_class
 from assist.signals.base import check_params, get_kind
+from assist.sinks.base import check_sinks
 from assist.station import DEFAULT_TZ, FALLBACK_ALT_M, FALLBACK_LAT_DEG, FALLBACK_LON_DEG
 from assist.timebase import format_iso, parse_duration, parse_iso
 
@@ -245,7 +248,7 @@ class SignalConfig(_M):
     kind: str
     params: dict[str, Any] = Field(
         default_factory=dict,
-        description="Parameters of the kind (plan §5); checked, and defaults filled in, once the kind is implemented.",
+        description="Parameters of the kind (plan §5); checked, and defaults filled in.",
     )
 
     @field_validator("kind")
@@ -467,10 +470,15 @@ class Emitter(_M):
 class Source(_M):
     id: str = Field(min_length=1)
     preset: str | None = Field(None, description="Preset the source was expanded from.")
-    platform: Literal["satellite", "ground", "local"] = Field(
+    platform: str = Field(
         "satellite",
-        description="satellite (an orbit); ground (M7: a terrestrial transmitter without geometry, fixed received "
-        "level); local (M7: interference inside the receiver, e.g. birdies, USB noise).",
+        description="satellite (an orbit); ground (a terrestrial transmitter without geometry, fixed received "
+        "level); local (interference inside the receiver, e.g. birdies, USB noise); or a platform from a module "
+        "listed under `plugins:`.",
+    )
+    platform_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters of the platform (the core platforms have none); checked, and defaults filled in.",
     )
     name: str | None = None
     orbit: Orbit | None = Field(None, description="Satellites only (required there).")
@@ -483,19 +491,27 @@ class Source(_M):
     )
     emitters: list[Emitter] = Field(min_length=1)
 
+    @field_validator("platform")
+    @classmethod
+    def _platform(cls, v: str) -> str:
+        platform_class(v)
+        return v
+
     @model_validator(mode="after")
     def _unique_emitters(self) -> Source:
-        if self.platform == "satellite":
-            if self.orbit is None:
-                raise ValueError(f"source {self.id}: a satellite needs an orbit")
-        else:
-            if self.orbit is not None or self.in_catalog or self.catalog_norad is not None:
-                raise ValueError(f"source {self.id}: a {self.platform} source has no orbit and is not in the catalog")
-            for e in self.emitters:
-                if e.oscillator is not None:
-                    raise ValueError(f"source {self.id}: emitter {e.id}: per-pass oscillators need a satellite")
+        # What a source may have depends on its platform's declared capabilities, not on the platform's name.
+        plat = platform_class(self.platform)
+        self.platform_params = check_platform_params(self.platform, self.platform_params)
+        if plat.needs_orbit and self.orbit is None:
+            raise ValueError(f"source {self.id}: a {self.platform} needs an orbit")
+        no_orbit = not plat.needs_orbit and self.orbit is not None
+        no_catalog = not plat.catalog and (bool(self.in_catalog) or self.catalog_norad is not None)
+        if no_orbit or no_catalog:
+            raise ValueError(f"source {self.id}: a {self.platform} source has no orbit and is not in the catalog")
         for e in self.emitters:
-            if get_kind(e.signal.kind).mode == "wideband" and self.platform != "local":
+            if e.oscillator is not None and not plat.supports_oscillator:
+                raise ValueError(f"source {self.id}: emitter {e.id}: per-pass oscillators need a satellite")
+            if get_kind(e.signal.kind).mode == "wideband" and not plat.allows_wideband:
                 raise ValueError(f"source {self.id}: emitter {e.id}: wideband signals belong to a local source")
         ids = [e.id for e in self.emitters]
         if len(ids) != len(set(ids)):
@@ -505,6 +521,30 @@ class Source(_M):
             if isinstance(e.channel, int) and not 0 <= e.channel < n:
                 raise ValueError(f"source {self.id}: emitter {e.id} uses channel {e.channel}, but channels has {n}")
         return self
+
+
+class Plugin(_M):
+    """One external module the scenario uses (see `assist.plugins`). In YAML a bare string is a `name`."""
+
+    name: str | None = Field(None, description="Entry point of the group assist.plugins, else an importable module.")
+    path: str | None = Field(
+        None, description="A Python file: looked up in the working directory, then next to the scenario file."
+    )
+    module: str | None = Field(None, description="An importable module.")
+    prefix: str | None = Field(None, description="Register the plugin's names as prefix.name.")
+    only: list[str] | None = Field(None, description="Use only these of the names the plugin registers.")
+    sha256: str | None = Field(None, description="Set by resolve for a `path` plugin: sha256 of the file.")
+    version: str | None = Field(None, description="Set by resolve: the plugin's version, when it has one.")
+    api: str | None = Field(None, description="Set by resolve: the assist.api version the plugin declares.")
+
+    @model_validator(mode="after")
+    def _check(self) -> Plugin:
+        plug.normalise(self.model_dump(exclude_none=True))
+        return self
+
+
+def _plugin_entry(v: Any) -> Any:
+    return {"name": v} if isinstance(v, str) else v
 
 
 class Scenario(_M):
@@ -518,10 +558,24 @@ class Scenario(_M):
     antenna: Antenna
     elements: Elements = Field(default_factory=Elements)
     sources: list[Source] = Field(default_factory=list)
-    sinks: list[dict[str, Any]] = Field(default_factory=list, description="Output sinks (used from M3/M4).")
+    sinks: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Output sinks for `assist run`: one-key mappings {sink name: settings}, e.g. `- wav: {}`, "
+        "`- fft: {width: 4096}`, `- rtl_tcp: {port: 1234}`. Settings are checked by the sink, defaults filled in.",
+    )
+    plugins: list[Annotated[Plugin, BeforeValidator(_plugin_entry)]] = Field(
+        default_factory=list,
+        description="External modules this scenario uses (signal kinds from outside the package). Only these are "
+        "loaded; core kinds need no entry.",
+    )
     assist_version: str | None = Field(None, description="Set by resolve.")
     band_hash: str | None = Field(None, description="Set by resolve: sha256 of the band directory.")
     profile_hash: str | None = Field(None, description="Set by resolve: sha256 of the profile (without bank/).")
+
+    @field_validator("sinks", mode="before")
+    @classmethod
+    def _sinks(cls, v: Any) -> Any:
+        return check_sinks(v) if isinstance(v, list) else v
 
     @model_validator(mode="after")
     def _unique_sources(self) -> Scenario:

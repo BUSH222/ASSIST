@@ -122,7 +122,7 @@ def test_render_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sc = tmp_path / "z.yaml"
     sc.write_text(SCENARIO)
     out = tmp_path / "out"
-    res = runner.invoke(app, ["render", str(sc), "-o", str(out)])
+    res = runner.invoke(app, ["run", str(sc), "--sink", "wav", "-o", str(out)])
     assert res.exit_code == 0, res.output
     (wav,) = out.glob("*.wav")
     assert wav.name == "baseband_137000000Hz_15-00-00_04-11-2026.wav"
@@ -130,29 +130,56 @@ def test_render_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert run["status"] == "complete" and run["render"]["n_samples"] == 600_000
     assert run["render"]["start_sample_abs"] == sample_at(parse_iso("2026-11-04T12:00:00Z"), FS)
     assert run["files"][0]["name"] == wav.name and run["scenario"]["sources"][0]["id"] == "z1"
+    assert run["sinks"] == [
+        {"kind": "wav", "params": {"rf64": False}, "info": {"format": "wav", "samples_written": 600_000}}
+    ]
+    assert run["plugins"] == [] and "format" not in run["render"]
     assert len(run["scenario_hash"]) == 64 and run["noise"]["sigma_counts"] == pytest.approx(26.6868)
     x = Recording(wav).u8(0, 600_000).astype(np.float64) - 127.5
     assert 25 < x.std() < 29  # noise plus a weak carrier
 
-    again = runner.invoke(app, ["render", str(sc), "-o", str(out)])
+    again = runner.invoke(app, ["run", str(sc), "--sink", "wav", "-o", str(out)])
     assert again.exit_code == 1 and "exists" in again.output
     before = wav.read_bytes()
-    forced = runner.invoke(app, ["render", str(sc), "-o", str(out), "--force"])
+    forced = runner.invoke(app, ["run", str(sc), "--sink", "wav", "-o", str(out), "--force"])
     assert forced.exit_code == 0 and wav.read_bytes() == before  # T-DET: same bytes again
 
-    part = runner.invoke(app, ["render", str(sc), "-o", str(tmp_path / "raw"), "--format", "cu8", "--from", "+0.1s"])
+    part = runner.invoke(app, ["run", str(sc), "--sink", "cu8", "-o", str(tmp_path / "raw"), "--from", "+0.1s"])
     assert part.exit_code == 0, part.output
     (raw,) = (tmp_path / "raw").glob("*.cu8")
     assert raw.read_bytes() == before[44 + 2 * 240_000 :]  # T-WIN through the CLI
+
+    # Two file sinks in one run get the same stream; the settings of one are changed with --set
+    both = tmp_path / "both"
+    args = ["run", str(sc), "--sink", "wav", "--sink", "cu8", "-o", str(both), "--set", "sinks[wav].rf64=true"]
+    res = runner.invoke(app, args)
+    assert res.exit_code == 0, res.output
+    (rf, cu) = sorted(both.glob("baseband_*"), key=lambda p: p.suffix, reverse=True)
+    assert rf.suffix == ".wav" and rf.read_bytes()[:4] == b"RF64"
+    assert cu.read_bytes() == before[44:] == rf.read_bytes()[-len(before) + 44 :]
+    run2 = json.loads((both / "run.json").read_text())
+    assert [s["kind"] for s in run2["sinks"]] == ["wav", "cu8"] and run2["sinks"][0]["params"] == {"rf64": True}
+    assert len(run2["files"]) == 2 and run2["scenario_hash"] == run["scenario_hash"]  # sinks are not in the hash
 
 
 def test_render_cli_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(ROOT)
     sc = tmp_path / "z.yaml"
     sc.write_text(SCENARIO)
-    bad = runner.invoke(app, ["render", str(sc), "-o", str(tmp_path / "o"), "--format", "mp3"])
-    assert bad.exit_code != 0
-    bad = runner.invoke(app, ["render", str(sc), "-o", str(tmp_path / "o"), "--format", "cu8", "--rf64"])
-    assert bad.exit_code != 0
-    ppm = runner.invoke(app, ["render", str(sc), "-o", str(tmp_path / "o"), "--set", "frontend.ppm=2"])
+    none = runner.invoke(app, ["run", str(sc), "-o", str(tmp_path / "o")])
+    assert none.exit_code == 2 and "lists no sinks" in none.output and "wav, cu8, fft, rtl_tcp" in none.output
+    bad = runner.invoke(app, ["run", str(sc), "--sink", "mp3", "-o", str(tmp_path / "o")])
+    assert bad.exit_code == 2 and "unknown sink 'mp3'" in bad.output
+    bad = runner.invoke(
+        app, ["run", str(sc), "--sink", "cu8", "-o", str(tmp_path / "o"), "--set", "sinks[cu8].rf64=1"]
+    )
+    assert bad.exit_code == 2 and "rf64" in bad.output
+    twice = runner.invoke(app, ["run", str(sc), "--sink", "cu8", "--sink", "cu8", "-o", str(tmp_path / "o")])
+    assert twice.exit_code == 2 and "twice" in twice.output
+    empty = runner.invoke(app, ["run", str(sc), "--sink", "cu8", "-o", str(tmp_path / "o"), "--from", "+1s"])
+    assert empty.exit_code == 2 and "window is empty" in empty.output
+    assert not (tmp_path / "o").exists()
+    for cmd in ("render", "fft", "serve"):
+        assert runner.invoke(app, [cmd, str(sc)]).exit_code != 0  # the old commands are gone
+    ppm = runner.invoke(app, ["run", str(sc), "--sink", "wav", "-o", str(tmp_path / "o"), "--set", "frontend.ppm=2"])
     assert ppm.exit_code == 2 and "until M7" in ppm.output

@@ -5,10 +5,10 @@ list. Values are printed with fixed precision so the text is the same on every m
 integer mHz, so f_rx = f_tx + doppler exactly), angles to 1e-6 deg, range to 1 mm, range rate to 0.1 mm/s, levels
 to 0.001 dB.
 
-Ground and local sources (M7) have no geometry: their rows leave norad, elevation, azimuth, range and range rate
-empty, and Doppler is 0. Every event (a VDL burst, an AM transmission, a 138 MHz carrier, a hump episode) lists its
-frequency with its own offset and its strength (rx_dbm, cn0_dbhz) with its own level; a USB-hump episode has no
-single frequency or level (its strength is `amplitude_db` in params, its spacing `spacing_hz`), so those cells are
+Sources on a fixed platform (ground, local) have no geometry: their rows leave norad, elevation, azimuth, range and
+range rate empty, and Doppler is 0. Every event (a VDL burst, an AM transmission, a 138 MHz carrier, a hump episode)
+lists its frequency with its own offset and its strength (rx_dbm, cn0_dbhz) with its own level; a USB-hump episode has
+no single frequency or level (its strength is `amplitude_db` in params, its spacing `spacing_hz`), so those cells are
 empty. `platforms` restricts the output to some platform kinds.
 """
 
@@ -45,7 +45,6 @@ COLUMNS = (
     "active_fraction",
 )
 EVENT_COLUMNS = ("start", "end", "source_id", "emitter_id", "signal", "f_rx_hz", "rx_dbm", "cn0_dbhz", "params")
-PLATFORMS = ("satellite", "ground", "local")
 _TEXT = {"t_utc", "source_id", "emitter_id", "signal", "start", "end", "params"}
 
 
@@ -70,16 +69,16 @@ class TruthTable:
 
 
 def compute(
-    scene: Scene, t0: float, t1: float, step_s: float = 1.0, platforms: tuple[str, ...] = PLATFORMS
+    scene: Scene, t0: float, t1: float, step_s: float = 1.0, platforms: tuple[str, ...] | None = None
 ) -> TruthTable:
     """Rows at t0 + k * step (< t1) for continuous emitters, and events overlapping [t0, t1), of sources whose
-    platform is in `platforms`."""
+    platform is in `platforms` (None: every source)."""
     n = max(0, int(np.ceil((t1 - t0) / step_s - 1e-9)))
     t = t0 + np.arange(n) * step_s
     rows: list[tuple[float, str, str, dict[str, str]]] = []
     events: list[tuple[float, str, str, dict[str, str]]] = []
     for src in scene.sources:
-        if src.config.platform not in platforms:
+        if platforms is not None and src.config.platform not in platforms:
             continue
         plat = src.platform
         norad = "" if plat.norad is None else str(plat.norad)

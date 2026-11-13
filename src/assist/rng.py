@@ -5,6 +5,7 @@ by list position or Python's hash(). Adding or removing a source therefore never
 """
 
 import hashlib
+from typing import override
 
 import numpy as np
 
@@ -37,3 +38,42 @@ class KeyedRng:
 
     def _seq(self, key: tuple[str | int, ...]) -> np.random.SeedSequence:
         return np.random.SeedSequence(self.seed, spawn_key=tuple(key_int(k) for k in key))
+
+    def scope(self, *prefix: str | int) -> RngScope:
+        """The part of the key space under `prefix`."""
+        return RngScope(self, prefix)
+
+
+class RngScope:
+    """One consumer's share of the scenario's randomness: every key it uses starts with its prefix.
+
+    A scope hands out streams and 64-bit keys but not the seed or the `KeyedRng`, so a consumer cannot reach another
+    consumer's draws. Two scopes whose prefixes differ never give the same key, whatever names are used below them.
+
+    - `stream(*parts)`: a numpy Generator, for a few draws made in one go (an event's parameters, a per-pass offset).
+      Put the absolute index of the thing drawn (event start, slot, pass) in `parts`.
+    - `key64(*parts)`: a key for the counter-based kernels (`random_bytes`, `white`), whose counter is an absolute
+      index, so any window of a long sequence is generated on its own.
+    """
+
+    __slots__ = ("_rng", "prefix")
+
+    def __init__(self, rng: KeyedRng, prefix: tuple[str | int, ...] = ()) -> None:
+        for k in prefix:
+            key_int(k)  # reject bad key elements here, not at the first draw
+        self._rng = rng
+        self.prefix = tuple(prefix)
+
+    def stream(self, *parts: str | int) -> np.random.Generator:
+        return self._rng.stream(*self.prefix, *parts)
+
+    def key64(self, *parts: str | int) -> int:
+        return self._rng.key64(*self.prefix, *parts)
+
+    def child(self, *parts: str | int) -> RngScope:
+        """A narrower scope: this prefix followed by `parts`."""
+        return RngScope(self._rng, (*self.prefix, *parts))
+
+    @override
+    def __repr__(self) -> str:
+        return f"RngScope({', '.join(repr(k) for k in self.prefix)})"

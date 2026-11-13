@@ -470,7 +470,7 @@ Two design consequences worth remembering:
 ## 5. Life of a config
 
 A scenario goes through **six stages**. Each stage has a precise input and output type, and each stage can fail with a
-specific error. `assist validate` runs stages 1-5; `assist truth`, `render`, `serve` and friends run all six.
+specific error. `assist validate` runs stages 1-5; `assist truth`, `run` and friends run all six.
 
 ```mermaid
 flowchart LR
@@ -734,7 +734,7 @@ classDiagram
 Things the schema does beyond types (these are the rules you hit as error messages):
 
 * **Discriminated unions.** `orbit` is chosen by which key it has (`_orbit_tag`: `norad` | `kepler` | `synthetic_pass`), `schedule` by `type`, `pattern` by `type` (with the string aliases `qfh_poly` and `isotropic` expanded first by `_pattern_alias`).
-* **`SignalConfig`**: `kind` must be a known kind (`get_kind`), and `check_params` validates the kind's parameter model and **writes back the defaults**, so a resolved scenario lists every parameter. Unknown kinds that are listed but not implemented (`bank_clip`) pass here, but `signal_class` refuses to build them.
+* **`SignalConfig`**: `kind` must be a known kind (`get_kind`), and `check_params` validates the kind's parameter model and **writes back the defaults**, so a resolved scenario lists every parameter. A kind is known when it is a core kind or comes from a module the scenario lists under `plugins:` (those are loaded before validation).
 * **`Level._one`**: exactly one of the five level keys. (A resolved level holds exactly `p_tx_dbw` or `rx_dbm`, plus `resolved_from`.)
 * **`Emitter._frequency`**: exactly one of `freq_hz`/`channel`; a frequency *list* only for event signals; `level` required except for wideband kinds; wideband kinds forbid `level`, `per_event`, `am` and need an event schedule (episodes); `per_event` needs an event schedule.
 * **`Source._unique_emitters`**: satellites need an orbit; ground/local forbid orbit, catalog flags and `oscillator`; wideband kinds only on `local`; unique emitter ids; integer `channel` indices within `channels`.
@@ -743,8 +743,8 @@ Things the schema does beyond types (these are the rules you hit as error messag
 * **`Elements`**: `latest` and `latest_existing` are mutually exclusive.
 * **`Scenario._unique_sources`**: duplicate source ids are an error.
 
-`sinks` is deliberately *not* validated here (it is a list of loose dicts); the `fft` sink validates itself with `FftSpec.from_dict` and the rtl_tcp address
-is read by `cli._rtl_tcp_sink`.
+`sinks` is a list of one-key mappings {sink name: settings}; `check_sinks` (`sinks/base.py`) looks each sink up in the registry and validates its settings
+with the sink's own `Params` model (the `fft` sink reuses `FftSpec.from_dict`), writing the defaults back.
 
 ### 5.4 Stage 4: resolve (`config/resolve.py`)
 
@@ -841,7 +841,7 @@ re-reading the JSON would give (floats normalised, defaults identical).
 **scenario hash** is its sha256. Properties:
 
 * **Idempotent.** A resolved document resolves to itself: `omm`, `solution`, `resolved_from`, a concrete clock start, a concrete element file list and
-  `phase_s` are all present, so every "if missing, fill in" branch is skipped. That is why `assist resolve -o r.json` followed by `assist render r.json` is legal.
+  `phase_s` are all present, so every "if missing, fill in" branch is skipped. That is why `assist resolve -o r.json` followed by `assist run r.json` is legal.
 * **Complete.** The hash covers the seed, clock, station position, front end, antenna, band and profile content hashes, every source, orbit, element set, solved orbit, level and parameter.
   Same hash => same stream (to the bit with the same kernels; C++ and numpy builds differ by at most one count in a few per million samples).
 * **Machine-independent.** The element data is embedded, the profile is hashed by content (not path), and the profile is named by its path *as written in the scenario*.
@@ -1661,7 +1661,7 @@ u = clip( rint(127.5 + G * (signal + noise)), 0, 255 )          interleaved I, Q
 * **Renderer buffers**: 19 MB complex64 `sig` (101 hops), 19 MB `noise`, 19 MB `iq`, 4.8 MB `u8`, allocated once and reused ("fresh 19 MB arrays every chunk cost page faults, which contend between worker processes"). Consequently **`chunk_u8(c)` returns a view valid only until the next chunk**; `u8()` copies.
   The single-slot caches `_sig`, `_nz`, `_iq`, `_u8` remember which chunk they hold.
 * **Stage timers** (`Renderer.times`): `control` (Python: per-emitter control and narrow samples), `synth`, `wideband`, `noise`, `adc`, `prefetch`. `assist bench` prints them per second of stream.
-* **Live prefetch** (`prefetch=True`, `serve` only): in the last 60 s of each UTC hour the renderer precomputes **the next hour's** event slots (one schedule per chunk) and passes/geometry (a few emitters per chunk, finished within ~30 s), so the hour boundary - where every
+* **Live prefetch** (`prefetch=True`, serving sinks only): in the last 60 s of each UTC hour the renderer precomputes **the next hour's** event slots (one schedule per chunk) and passes/geometry (a few emitters per chunk, finished within ~30 s), so the hour boundary - where every
   `SplineGeometry` needs a fresh block and every schedule a new slot - costs no more than any other second.
 * **Speed** (figures from the README, measured on the dev machine): one core renders the 50-source `realtime.yaml` at ~7x real time; the multi-process file render reaches 20-30x on 6 cores. ~1.3x with `ASSIST_PURE=1` on 20 carriers.
 
@@ -1761,7 +1761,7 @@ flowchart LR
 * `plan_files(...)` returns `OutFile(path, first, n_samples, start_sample)` for each file; `first` counts from the start of the render, `start_sample` is the absolute sample index. Duplicate names (a split shorter than 1 s) are refused.
 * `FileSink.write(u8)` takes pieces of any size, straddling file boundaries; `close()` checks that the planned number of samples was written.
 * **Headers are written with their final sizes up front**, so an interrupted render leaves files whose headers claim too much; readers that tolerate that (SDR++, `profile.wavio`) read to the end.
-* `cli.render` refuses to overwrite (`--force`), writes `run.json` with status `rendering` before the first byte and `complete` after the last, prints progress every 60 s of stream, and reports `x real time`.
+* The runner (`sinks/runner.py`, behind `assist run`) refuses to overwrite (`--force`), writes `run.json` with status `rendering` before the first byte and `complete` after the last, prints progress every 60 s of stream, and reports `x real time`.
 
 ### 11.2 The waterfall sink (`sinks/fft.py`, `waterfall.py`)
 
@@ -1776,7 +1776,7 @@ A parametrised copy of the capture script that made the station's real waterfall
 
 ### 11.3 The rtl_tcp server (`sinks/rtltcp.py`)
 
-`assist serve` speaks the protocol of librtlsdr's `rtl_tcp`, so SDR++'s **RTL-TCP** source (or anything that uses `rtl_tcp`) connects as if to a real dongle.
+The `rtl_tcp` sink of `assist run` speaks the protocol of librtlsdr's `rtl_tcp`, so SDR++'s **RTL-TCP** source (or anything that uses `rtl_tcp`) connects as if to a real dongle.
 
 **Protocol.** On connect the server sends 12 bytes, `"RTL0"` + big-endian `uint32` tuner type (5 = R820T) + `uint32` gain count (29); then an endless stream of interleaved `uint8` IQ. The client may send **5-byte commands** (`uint8` command, big-endian `uint32` parameter): set frequency, sample rate, gain, AGC, bias-tee, ...
 They are **logged with the stream position and ignored**, because the tuning is fixed (a note is added if the client asks for a different frequency or rate).
@@ -1834,7 +1834,7 @@ sequenceDiagram
 * **Stalls.** If the ring is empty at a chunk's due time the stream waits, logs it, and moves the anchor by the stall's length: *content is unchanged, only the wall-clock alignment slips*. `run.json` counts `stalls` and `stall_s`.
 * **Fan-out.** Every client receives exactly the same chunks, from the first chunk sent after it connects (`_Client.since` records the absolute sample). **With nobody connected the chunks are dropped and the stream keeps running**, so time keeps tracking the wall clock.
 * **Backlog guard.** There is no per-client dropping (clients are assumed local), but a client whose unsent data exceeds `max_backlog_s` = 10 s of stream (48 MB) is disconnected so a stuck client cannot exhaust memory.
-* **`--pacing unpaced`.** Chunks go out as fast as the slowest client reads (`drain()` back-pressure), and the stream *holds* while nobody is connected. Used by tests and for fast piping into another tool.
+* **`pacing: unpaced`** (a sink setting)**.** Chunks go out as fast as the slowest client reads (`drain()` back-pressure), and the stream *holds* while nobody is connected. Used by tests and for fast piping into another tool.
 * A status line (clients, ring fill, minimum fill, stalls) is logged every 60 s. Ctrl-C stops the server; `finally` closes clients and joins the render thread.
 
 ### 11.4 `run.json` (`sinks/runinfo.py`)
@@ -1851,13 +1851,13 @@ files:    [{name, first_sample, n_samples, start_sample_abs, start_utc, duration
 scenario: the complete resolved scenario
 ```
 
-Because the resolved scenario is inside, **`run.json` alone is enough to reproduce the exact stream** (`assist render run.json ...` would not parse it directly, but `run.json["scenario"]` is a valid resolved scenario).
+Because the resolved scenario is inside, **`run.json` alone is enough to reproduce the exact stream** (`assist run run.json ...` would not parse it directly, but `run.json["scenario"]` is a valid resolved scenario).
 
 ### 11.5 Parallel rendering (`engine/workers.py`) and `bench`
 
 ```mermaid
 flowchart TD
-    CLI["cli.render"] --> T["tasks(n0, n, fs): cut [n0, n0+n) at ABSOLUTE multiples of 4 s<br/>(first and last task may be partial)"]
+    CLI["sinks.runner (assist run)"] --> T["tasks(n0, n, fs): cut [n0, n0+n) at ABSOLUTE multiples of 4 s<br/>(first and last task may be partial)"]
     T --> POOL["ProcessPoolExecutor<br/>spawn context, max_workers = N<br/>initializer: ignore SIGINT, build Renderer from the canonical JSON"]
     POOL --> W1["worker 1: Renderer.u8(n0_a, n_a)"]
     POOL --> W2["worker 2: Renderer.u8(n0_b, n_b)"]
@@ -1938,29 +1938,34 @@ Per-event draws are added: `+ offset_hz` to the frequency, `+ level_db` to the l
 | `passes` | yes | `Scene` | `platform.passes` | + geometry (Skyfield) | table / CSV |
 | `truth` | yes | `Scene` | `truth.compute` | same | `truth.csv`/`jsonl` + `.events.*` |
 | `catalog` | yes | - | `catalog.entries/write` | element files | `.tle` / `.json` |
-| `render` | yes | `Scene`, `Renderer` | `Renderer.iter_u8` or `workers.iter_u8`, `FileSink` | + profile arrays | IQ files + `run.json` |
-| `fft` | yes | `Scene`, `Renderer`, `WaterfallSink` | same stream into the sink | same | PNG + `run.json` |
+| `run` (file sinks: `wav`, `cu8`, `fft`) | yes | `Scene`, `Renderer`, the sinks | `sinks.runner.run`: `Renderer.iter_u8` or `workers.iter_u8`, each piece to every sink | + profile arrays | IQ files / PNG + `run.json` |
 | `bench` | yes | `Renderer` x2 | `engine.bench.run` | same | `out/bench/<name>.json` |
-| `serve` | yes (+ re-load to see if `clock.start` is `now`) | `Scene`, `Renderer(prefetch=True)`, `RenderAhead`, `RtlTcpServer` | `asyncio.run(server.serve())` | same | `out/serve/run.json` |
+| `run` (a serving sink: `rtl_tcp`) | yes (`Resolved.clock_now` says whether the clock was `now`) | `Scene`, `Renderer(prefetch=True)`, `RenderAhead`, the sink's `StreamServer` | `sinks.runner.run`: `asyncio.run(sink.serve(ahead))` | same | `run.json` |
 | `fetch_omm` / `elements fetch` | no | - | `elements.fetch` | network | `elements/<feed>_<date>.csv` |
 | `profile build \| labels \| report \| terrestrial` | no | - | `assist.profile.*` | `samples/` | `profiles/vhf137/`, `out/profile/`, `bands/.../terrestrial_default.yaml` |
 
 Common to all scenario commands: scenario path first, repeated `--set path=value`; errors print `error: ...` and exit 2; warnings (stale elements, failed download) print as `warning: ...` and do not stop anything.
-`--from`/`--to` accept ISO-with-zone, `start`, or `+offset` from the clock start; `_window` rejects `--to <= --from`. Default window of `passes`/`truth`/`render`: the scenario's `clock` (`serve` runs past `clock.duration`).
+`--from`/`--to` accept ISO-with-zone, `start`, or `+offset` from the clock start; `_window` rejects `--to <= --from`. Default window of `passes`/`truth`/`run` with file sinks: the scenario's `clock` (a serving sink runs past `clock.duration`).
 
 ```mermaid
 flowchart TD
-    subgraph render["assist render"]
-        R1["_resolve"] --> R2["Renderer(Scene)"]
-        R2 --> R3["n0 = sample_at(from, fs), n = round(dur * fs)"]
-        R3 --> R4["plan_files() + overwrite check"]
+    subgraph run["assist run (sinks/runner.py)"]
+        R1["_resolve"] --> R0["select_sinks: the scenario's sinks or --sink;<br/>file sinks only, or one serving sink"]
+        R0 --> R2["Renderer(Scene)"]
+        R2 --> Q{"serving sink?"}
+        Q -- no --> R3["n0 = sample_at(from, fs), n = round(dur * fs)"]
+        R3 --> R4["build sinks (SinkContext); n = max(sink.planned());<br/>overwrite check on sink.files()"]
         R4 --> R5["write run.json (rendering)"]
         R5 --> R6{"workers > 1 ?"}
         R6 -- yes --> R7["workers.iter_u8"]
         R6 -- no --> R8["Renderer.iter_u8"]
-        R7 --> R9["FileSink.write per piece"]
+        R7 --> R9["sink.write per piece, for every sink<br/>until it has what it planned"]
         R8 --> R9
-        R9 --> R10["close() + write run.json (complete)"]
+        R9 --> R10["sink.close() + write run.json (complete)"]
+        Q -- yes --> S1["live start if clock was `now`; RenderAhead"]
+        S1 --> S2["write run.json (serving)"]
+        S2 --> S3["asyncio.run(sink.serve(ahead))"]
+        S3 --> S4["write run.json (complete / stopped) with stream statistics"]
     end
 ```
 
@@ -2016,7 +2021,7 @@ What each measurement contributes and **who uses it at run time**:
 | `birdies.json` | P6 | persistent narrow lines | only via `derive` -> `terrestrial_default.yaml` |
 | `terrestrial.json` | P14 | VDL burst statistics and levels, AM per channel, 138 MHz carrier | only via `derive` |
 | `noise_hourly.npy` | P3 | 24 hourly noise-level values | **No** (the diurnal noise level is not modelled) |
-| `bank/` | P11 | clips of real signals at 50 kS/s | **No** (gitignored; reserved for a future `bank_clip` signal kind) |
+| `bank/` | P11 | clips of real signals at 50 kS/s | **No** (gitignored; not used by any signal kind) |
 
 The measurements in a little more depth:
 
@@ -2050,7 +2055,7 @@ Other `profile` commands: `labels` writes a stratified sample (~200) of the even
 | **T-SIG** | signal properties: unit power, occupied bandwidth, fitted roll-off, 4th-power line, ORBCOMM through the profile tool's own estimators | `test_signals` (the same signals through the whole engine: `test_satellite_render`) |
 | **T-OLA** | the synthesiser reproduces single tones/signals exactly (both C++ and twin) | `test_synth` |
 | **T-REF** | every C++ kernel equals its numpy twin | `test_dsp_ref` |
-| **T-RTL** | rtl_tcp header, commands, fan-out, pacing, stalls, the `serve` command | `test_rtltcp` (a stub source whose sample `n` carries `n mod 2^16` makes continuity visible) |
+| **T-RTL** | rtl_tcp header, commands, fan-out, pacing, stalls, the rtl_tcp sink through `assist run` | `test_rtltcp` (a stub source whose sample `n` carries `n mod 2^16` makes continuity visible) |
 | **T-WAV** | WAV/RF64/cu8 written and read back; SDR++ names and splits; `run.json` | `test_sinks`, `test_wavio` |
 
 Other groups: configuration (`test_config`, `test_elements`: fake opener, no network), orbits (`test_orbits`, `test_passes`), the profile tool's maths (`test_profile_dsp`, `test_profile_models`, `test_rawio`), the waterfall maths against **verbatim copies of the capture script's code** (`test_waterfall`, `test_fft_sink`), measurement helpers (`test_measure`).
@@ -2139,8 +2144,8 @@ Narrow stream: 101 x 110 = 11 110 complex samples, all 100 blocks active. The si
 * **Truth vs IQ at the pass edges.** Truth rows exist from AOS to LOS at full link-budget level; the IQ rises/falls over `fade_s`. Compare truth with IQ only away from the edges.
 * **The scenario hash depends on `samples/station.yaml`** when you did not give `station:` - the file's presence changes the resolved position. Give a `station:` block for reproducible hashes.
 * **`elements: {latest: true}` can touch the network at resolve time** (download of missing snapshots). It is in `example.yaml` and `realtime.yaml`; `latest_existing: true` or `elements.files` never does. Network access exists only in `orbits/elements.py` (`fetch`, `latest_snapshots`).
-* **`serve` ignores `clock.duration`** (it streams until stopped or `--duration`); event schedules and geometry are defined for all time, so this is fine.
-* **First seconds of a big live scenario are late once** unless you give a lookahead (`--lookahead 4s`).
+* **A serving sink ignores `clock.duration`** (it streams until stopped or `--duration`); event schedules and geometry are defined for all time, so this is fine.
+* **First seconds of a big live scenario are late once** unless you give a lookahead (`lookahead: 4s` in the `rtl_tcp` sink).
 * **Python 3.15 only** (`requires-python >= 3.15`; the code uses PEP 758 `except A, B:` in `rtltcp.py`).
 * **The numpy engine differs by at most one ADC count** in a few parts per million from the C++ engine (float32 FFT rounding); the *hash* does not distinguish them - `run.json` records the engine.
 * **Message numbering**: some error strings still say "until M7"/"until M8" (milestone names from development).
@@ -2160,8 +2165,8 @@ Narrow stream: 101 x 110 = 11 110 complex samples, all 100 blocks active. The si
 
 **Add a signal kind**
 
-1. `signals/<name>.py`: a `SignalParams` subclass (extra=forbid, defaults), a `Signal` subclass with `kind`, `Params`, `mode`, `bandwidth_hz`, `preferred_rate`, `rate_step`, and `render` (continuous) or `draw_event` + `max_duration_s` + `render_events` + `event_bounds` (event).
-2. Register it: add a `SignalKind(name, mode, milestone)` to `KINDS`, the name to `IMPLEMENTED`, and the class to `signal_class`'s table in `signals/base.py`.
+1. `signals/<name>.py`: a `SignalParams` subclass (extra=forbid, defaults), a `Signal` subclass with `Params`, `mode`, `bandwidth_hz`, `preferred_rate`, `rate_step`, and `render` (continuous) or `draw_event` + `max_duration_s` + `render_events` + `event_bounds` (event).
+2. Register it: decorate the class with `@register_signal("<name>")` and add the module to the core list in `registry.py`. (A kind kept outside the package needs neither: put it in its own file that imports `assist.api`, and list the file under `plugins:` in the scenario; see `examples/plugins/pretty_gfsk.py`.)
 3. Use `keys.key64("purpose")` and an absolute counter for every random thing; derive sample times from integers.
 4. If a new numeric kernel is needed: add it to `cpp/*.cpp` + `.hpp`, bind it in `bindings.cpp`, declare it in `_dsp.pyi`, write the twin in `dsp_ref/` and export it from `dsp_ref/__init__.py`, and add a T-REF test.
 5. Tests: unit power, bandwidth, window independence (render a window directly and as a slice).
@@ -2170,7 +2175,7 @@ Narrow stream: 101 x 110 = 11 110 complex samples, all 100 blocks active. The si
 
 **Add a schedule type**: a pydantic model in `schema.py` (add it to the `ScheduleConfig` union with a `type` literal), a `Schedule` subclass implementing `envelope`, `active_fraction`, `active_intervals` (and `events` if it is an event schedule, deriving from `_EventSchedule` so slots are keyed), and a branch in `make_schedule`.
 
-**Add an output sink**: consume `Renderer.iter_u8(n0, n)` (or `workers.iter_u8` for parallelism) and write `run.json` via `runinfo.run_info`; follow `FileSink` (planned size, `close()` check) or `WaterfallSink` (accepts any piece size). Add a command in `cli.py` and, if it takes settings from the scenario, a key in `sinks:` that validates itself.
+**Add an output sink**: a `Sink` subclass (`sinks/base.py`) registered with `@register_sink("<name>")`, with a `Params` model for its settings. A push sink implements `planned` (how many samples it takes), `files`, `write(u8)`, `close` and `abort`: follow `WavSink` (planned size, `close()` check) or `FftSink` (accepts any piece size, may finish early). A serving sink derives from `StreamSink` (`sinks/stream.py`) and supplies a `StreamServer` subclass (`greeting`, `read_client`, `encode`); rendering ahead, pacing, fan-out and the backlog guard are shared. No command is added: `assist run` drives every registered sink, and the runner writes `run.json`. A core sink's module goes in the list in `registry.py`; an external one lives in its own file listed under `plugins:` (`examples/plugins/tcp_sink.py`).
 
 **Add a band**: `bands/<name>/band.yaml` (defaults, noise sigma, calibrations, channels) and a profile for it; `noise_spec` insists that profile and scenario agree on `fc`/`fs`.
 

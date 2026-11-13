@@ -2,13 +2,15 @@
 scenario.
 
 It holds the resolved scenario (so `Scene` can be rebuilt from it), its hash, the package version and engine, the
-render window as absolute sample indices, the noise source and ADC gain, and each output file's first sample.
+external modules it loaded, the stream window as absolute sample indices, the noise source and ADC gain, the sinks
+that ran (their settings and what they report: file format, waterfall levels, stream statistics), and each output
+file's first sample.
 """
 
 import json
 from typing import TYPE_CHECKING, Any
 
-from assist import __version__
+from assist import __version__, plugins
 from assist.timebase import format_iso
 
 if TYPE_CHECKING:
@@ -27,9 +29,17 @@ def engine_name(rd: Renderer) -> str:
 
 
 def run_info(
-    r: Resolved, rd: Renderer, fmt: str, n0: int, n: int | None, files: list[OutFile], status: str, **extra: Any
+    r: Resolved,
+    rd: Renderer,
+    sinks: list[dict[str, Any]],
+    n0: int,
+    n: int | None,
+    files: list[OutFile],
+    status: str,
+    **extra: Any,
 ) -> dict[str, Any]:
-    """n None: an endless stream (`serve` without --duration)."""
+    """`sinks`: one {"kind", "params", "info"} per sink of the run. n None: an endless stream (a serving sink without
+    --duration)."""
     fs = rd.fs
     return {
         "status": status,
@@ -37,8 +47,21 @@ def run_info(
         "engine": engine_name(rd),
         "scenario_hash": r.hash,
         "clock_start": r.scenario.clock.start,
+        "api_version": plugins.API_VERSION,
+        "plugins": [
+            {
+                "plugin": p.label,
+                "version": p.version,
+                "api": p.api,
+                "sha256": p.sha256,
+                "module": p.module.__name__,
+                "file": getattr(p.module, "__file__", None),
+                "distribution": p.distribution,
+                "registers": [f"{cat} {name}" for cat, name in p.registered],
+            }
+            for p in plugins.active()
+        ],
         "render": {
-            "format": fmt,
             "fc_hz": rd.fc_hz,
             "fs_hz": fs,
             "start_sample_abs": n0,
@@ -54,6 +77,7 @@ def run_info(
             "t_sys_k": rd.scene.t_sys_k,
         },
         "emitters": [{"id": er.id, "narrow_rate_hz": er.rate, "f_bin_hz": er.f_bin_mhz / 1000} for er in rd.emitters],
+        "sinks": sinks,
         "files": [f.info(fs) for f in files],
         **extra,
         "scenario": json.loads(r.canonical),

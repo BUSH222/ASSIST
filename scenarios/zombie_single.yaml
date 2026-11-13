@@ -8,8 +8,8 @@
 # From the repository root:
 #   uv run assist passes scenarios/zombie_single.yaml                           # AOS 12:01:00, LOS 12:16:10 UTC
 #   uv run assist truth  scenarios/zombie_single.yaml -o out/zombie/truth.csv
-#   uv run assist render scenarios/zombie_single.yaml -o out/zombie                 # 18 min, 2 WAV files, 5.2 GB
-#   uv run assist render scenarios/zombie_single.yaml -o out/zombie_cu8 --format cu8 # one raw file (SDR++ Better File Source)
+#   uv run assist run scenarios/zombie_single.yaml --sink wav -o out/zombie                 # 18 min, 2 WAV files, 5.2 GB
+#   uv run assist run scenarios/zombie_single.yaml --sink cu8 -o out/zombie_cu8 # one raw file (SDR++ Better File Source)
 version: 1
 seed: 1
 clock: {start: "2026-11-04T12:00:00Z", duration: 18min}   # 1 min before AOS to ~2 min after LOS

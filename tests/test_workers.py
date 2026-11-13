@@ -88,7 +88,7 @@ def test_render_workers_cli(scenario: Path, tmp_path: Path) -> None:
         out = tmp_path / f"w{nw}"
         res = runner.invoke(
             app,
-            ["render", str(scenario), "-o", str(out), "--format", "cu8", "--duration", "9s", "--workers", str(nw)],
+            ["run", str(scenario), "--sink", "cu8", "-o", str(out), "--duration", "9s", "--workers", str(nw)],
         )
         assert res.exit_code == 0, res.output
         run = json.loads((out / "run.json").read_text())
@@ -100,7 +100,9 @@ def test_render_workers_cli(scenario: Path, tmp_path: Path) -> None:
 
 
 def test_render_workers_must_be_positive(scenario: Path, tmp_path: Path) -> None:
-    res = runner.invoke(app, ["render", str(scenario), "-o", str(tmp_path), "--duration", "1s", "--workers", "0"])
+    res = runner.invoke(
+        app, ["run", str(scenario), "--sink", "cu8", "-o", str(tmp_path), "--duration", "1s", "--workers", "0"]
+    )
     assert res.exit_code != 0
 
 

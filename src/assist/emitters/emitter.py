@@ -8,9 +8,9 @@ Truth values follow the plan's definitions:
 - active_fraction: share of [t, t + step) during which the schedule is on (half-amplitude edges).
 Frequencies are carried in integer mHz (see carrier.py), so the printed truth is exact to 1 mHz.
 
-Ground and local emitters (M7) have no geometry: a fixed received level (rx_dbm), no Doppler, always visible; their
-geometry columns are NaN. Events may carry per-event draws (M7): `offset_hz` (added to the frequency, integer mHz)
-and `level_db` (added to the level).
+Emitters on a fixed platform (ground, local) have no geometry: a fixed received level (rx_dbm), no Doppler, always
+visible; their geometry columns are NaN. Events may carry per-event draws (M7): `offset_hz` (added to the frequency,
+integer mHz) and `level_db` (added to the level).
 """
 
 import math
@@ -25,7 +25,7 @@ from assist.orbits.geometry import BLOCK_S
 if TYPE_CHECKING:
     from assist.emitters.carrier import Carrier
     from assist.emitters.schedules import AmModel, Event, Schedule
-    from assist.platforms.fixed import FixedPlatform
+    from assist.platforms.base import Platform
     from assist.platforms.satellite import SatellitePlatform
 
 
@@ -72,15 +72,15 @@ class Emitter:
     p_tx_dbw: float  # satellites (NaN for fixed platforms)
     tx_pattern: link.Pattern
     extra_loss_db: float
-    platform: SatellitePlatform | FixedPlatform
+    platform: Platform
     rx_pattern: link.Pattern
     t_sys_k: float
     horizon: link.HorizonModel
     freqs_mhz: tuple[int, ...] = ()  # rest frequency per channel (f_nominal + offset); () = just carrier.rest_mhz
-    rx_dbm: float | None = None  # fixed platforms: received level (None: wideband, relative to the noise)
+    rx_dbm: float | None = None  # received level, where the platform takes one (None: wideband)
     max_event_offset_hz: float = 0.0  # largest |per-event frequency offset|
     per_event: bool = False  # events carry offset_hz / level_db draws
-    fade_s: float = 0.0  # satellites: amplitude rises from 0 over this long after AOS and falls to 0 before LOS
+    fade_s: float = 0.0  # amplitude rises from 0 over this long after AOS and falls to 0 before LOS (0: no fade)
 
     @property
     def is_event(self) -> bool:
@@ -111,8 +111,8 @@ class Emitter:
         self, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray, f_mhz: int | None = None
     ) -> np.ndarray:
         """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2); at f_mhz if given.
-        Fixed platforms: their received level."""
-        if self.platform.fixed:
+        Platforms with a received level (ground, local, external ones): that level, whatever the geometry."""
+        if self.platform.level_mode == "received":
             return np.full(np.shape(el), np.nan if self.rx_dbm is None else self.rx_dbm)
         return link.p_rx_dbm(
             self.p_tx_dbw,
@@ -181,9 +181,9 @@ class Emitter:
     def _truth_chunk(self, t_all: np.ndarray, step_s: float) -> TruthArrays:
         if self.platform.fixed:
             return self._truth_fixed(t_all, step_s)
-        sat = self.sat
-        passes = sat.passes(float(t_all.min()), float(t_all.max()) + step_s) if t_all.size else []
-        keys_all = sat.geo.pass_keys(t_all, passes)
+        plat = self.platform
+        passes = plat.passes(float(t_all.min()), float(t_all.max()) + step_s) if t_all.size else []
+        keys_all = plat.pass_keys(t_all, passes)
         vis = keys_all >= 0
         t, keys = t_all[vis], keys_all[vis]
         g = self.platform.geometry(t)

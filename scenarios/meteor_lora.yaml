@@ -7,7 +7,7 @@
 # (68026) during the M2-4 pass.
 #   uv run assist passes scenarios/meteor_lora.yaml
 #   uv run assist truth  scenarios/meteor_lora.yaml -o out/meteor_lora/truth.csv
-#   uv run assist render scenarios/meteor_lora.yaml -o out/meteor_lora --format cu8       # 47 min = 13.5 GB
+#   uv run assist run scenarios/meteor_lora.yaml --sink cu8 -o out/meteor_lora       # 47 min = 13.5 GB
 version: 1
 seed: 6
 clock: {start: "2026-11-03T09:00:00Z", duration: 47min}

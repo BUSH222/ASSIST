@@ -1,4 +1,4 @@
-"""Command-line interface: `assist`. Commands are added milestone by milestone (plan §8)."""
+"""Command-line interface: `assist`."""
 
 import sys
 from pathlib import Path
@@ -13,11 +13,14 @@ if TYPE_CHECKING:
 
 app = typer.Typer(
     name="assist",
-    help="ASSIST: synthetic 2.4 MS/s RTL-SDR IQ at 137 MHz, served over rtl_tcp or written to files.",
+    help="ASSIST: synthetic 2.4 MS/s RTL-SDR IQ at 137 MHz, served over rtl_tcp or written to files (`assist run`).",
     no_args_is_help=True,
     add_completion=False,
 )
 elements_app = typer.Typer(help="Element sets (retlector.eu snapshots).", no_args_is_help=True)
+plugins_app = typer.Typer(
+    help="Signals, platforms and sinks: the core ones and those of plugins.", no_args_is_help=True
+)
 
 ScenarioArg = Annotated[Path, typer.Argument(help="Scenario (.yaml, .yml or .json; a resolved one works too).")]
 SetOpt = Annotated[
@@ -25,6 +28,14 @@ SetOpt = Annotated[
 ]
 FromOpt = Annotated[str | None, typer.Option("--from", help="ISO time, `start`, or +offset (default: clock start).")]
 ToOpt = Annotated[str | None, typer.Option("--to", help="ISO time or +offset from the clock start (default: end).")]
+PluginOpt = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--plugin",
+        help="Also load this external module (a .py file or a name), as if it were listed under `plugins:`. For "
+        "experiments: a scenario should name its plugins itself.",
+    ),
+]
 WorkersOpt = Annotated[int | None, typer.Option(help="Worker processes (default: the number of CPUs).")]
 
 
@@ -41,6 +52,7 @@ def _register_subcommands() -> None:
 
     app.add_typer(profile_app, name="profile")
     app.add_typer(elements_app, name="elements")
+    app.add_typer(plugins_app, name="plugins")
 
 
 _register_subcommands()
@@ -56,14 +68,14 @@ def main(
     """ASSIST: Autonomous Satellite Signal Imitator Station."""
 
 
-def _resolve(scenario: Path, sets: list[str] | None) -> Resolved:
+def _resolve(scenario: Path, sets: list[str] | None, extra_plugins: list[str] | None = None) -> Resolved:
     from pydantic import ValidationError
 
     from assist.config.loader import ConfigError
     from assist.config.resolve import resolve
 
     try:
-        r = resolve(scenario, tuple(sets or ()))
+        r = resolve(scenario, tuple(sets or ()), extra_plugins=tuple(extra_plugins or ()))
     except (ConfigError, ValidationError, KeyError, ValueError, FileNotFoundError) as e:
         typer.echo(f"error: {e}", err=True)
         raise typer.Exit(2) from e
@@ -108,9 +120,9 @@ def schema(
 
 
 @app.command()
-def validate(scenario: ScenarioArg, set_: SetOpt = None) -> None:
+def validate(scenario: ScenarioArg, set_: SetOpt = None, plugin: PluginOpt = None) -> None:
     """Check a scenario: load, draw, validate and resolve it."""
-    r = _resolve(scenario, set_)
+    r = _resolve(scenario, set_, plugin)
     sc = r.scenario
     n_em = sum(len(s.emitters) for s in sc.sources)
     typer.echo(f"ok: {len(sc.sources)} sources, {n_em} emitters, start {sc.clock.start}, scenario hash {r.hash}")
@@ -121,9 +133,10 @@ def resolve_cmd(
     scenario: ScenarioArg,
     out: Annotated[Path | None, typer.Option("-o", "--out", help="resolved.json (default: stdout).")] = None,
     set_: SetOpt = None,
+    plugin: PluginOpt = None,
 ) -> None:
     """Write the resolved, self-contained scenario (canonical JSON) and print its hash."""
-    r = _resolve(scenario, set_)
+    r = _resolve(scenario, set_, plugin)
     if out is None:
         sys.stdout.write(r.pretty())
     else:
@@ -141,6 +154,7 @@ def passes(
         Path | None, typer.Option("-o", "--out", help="Write CSV here (default: a table on stdout).")
     ] = None,
     set_: SetOpt = None,
+    plugin: PluginOpt = None,
 ) -> None:
     """Pass table of all satellite sources."""
     import numpy as np
@@ -148,7 +162,7 @@ def passes(
     from assist.engine.scene import Scene
     from assist.timebase import format_iso
 
-    r = _resolve(scenario, set_)
+    r = _resolve(scenario, set_, plugin)
     a, b = _window(r, t_from, t_to)
     scene = Scene(r.scenario)
     rows = []
@@ -206,11 +220,12 @@ def catalog(
     out: Annotated[Path, typer.Option("-o", "--out", help="catalog.tle or catalog.json")],
     sources_only: Annotated[bool, typer.Option(help="Only the scenario's sources, not the whole store.")] = False,
     set_: SetOpt = None,
+    plugin: PluginOpt = None,
 ) -> None:
     """Element sets ADRIFT is given: the store with leave-one-outs removed and synthetic in-catalog objects added."""
     from assist.orbits import catalog as cat
 
-    r = _resolve(scenario, set_)
+    r = _resolve(scenario, set_, plugin)
     es = cat.entries(r.scenario, Path.cwd(), sources_only)
     cat.write(es, out)
     typer.echo(f"{len(es)} element sets -> {out}", err=True)
@@ -225,9 +240,14 @@ def truth(
     step: Annotated[str, typer.Option(help="Row step, e.g. 1s, 100ms.")] = "1s",
     fmt: Annotated[str, typer.Option("--format", help="csv or jsonl")] = "csv",
     platforms: Annotated[
-        str, typer.Option(help="Comma-separated platform kinds to include: satellite, ground, local.")
-    ] = "satellite,ground,local",
+        str | None,
+        typer.Option(
+            help="Comma-separated platforms to include, e.g. satellite,ground,local or one from a plugin "
+            "(default: all)."
+        ),
+    ] = None,
     set_: SetOpt = None,
+    plugin: PluginOpt = None,
 ) -> None:
     """Truth for every emitter: frequencies, Doppler, geometry and levels per step, plus an event list (every burst
     with its frequency and strength)."""
@@ -237,11 +257,15 @@ def truth(
 
     if fmt not in ("csv", "jsonl"):
         raise typer.BadParameter("--format must be csv or jsonl")
-    kinds = tuple(k.strip() for k in platforms.split(",") if k.strip())
-    bad = [k for k in kinds if k not in tr.PLATFORMS]
-    if bad or not kinds:
-        raise typer.BadParameter(f"--platforms takes {', '.join(tr.PLATFORMS)} (got {platforms!r})")
-    r = _resolve(scenario, set_)
+    r = _resolve(scenario, set_, plugin)  # first: the scenario's plugins may add platforms
+    kinds = None
+    if platforms is not None:
+        from assist import registry
+
+        known = registry.platforms.names()
+        kinds = tuple(k.strip() for k in platforms.split(",") if k.strip())
+        if not kinds or any(k not in known for k in kinds):
+            raise typer.BadParameter(f"--platforms takes {', '.join(known)} (got {platforms!r})")
     a, b = _window(r, t_from, t_to)
     table = tr.compute(Scene(r.scenario), a, b, parse_duration(step), kinds)
     write = tr.write_csv if fmt == "csv" else tr.write_jsonl
@@ -258,179 +282,52 @@ def truth(
 
 
 @app.command()
-def render(
+def run(
     scenario: ScenarioArg,
-    out: Annotated[Path, typer.Option("-o", "--out", help="Output directory (files + run.json).")],
-    t_from: FromOpt = None,
-    duration: Annotated[
-        str | None, typer.Option(help="e.g. 90s, 16min, 2h (default: to the end of the scenario clock).")
+    sink: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--sink",
+            help="Run only this sink (repeatable). Default: every sink in the scenario's `sinks:`. A sink the "
+            "scenario does not list runs with its default settings.",
+        ),
     ] = None,
-    fmt: Annotated[str, typer.Option("--format", help="wav (split every 10 min) or cu8 (one raw file).")] = "wav",
-    rf64: Annotated[bool, typer.Option("--rf64", help="With wav: one RF64 file instead of 10 min splits.")] = False,
-    force: Annotated[bool, typer.Option("--force", help="Overwrite existing output files.")] = False,
-    workers: WorkersOpt = None,
-    set_: SetOpt = None,
-) -> None:
-    """Render the station's uint8 IQ stream to files, in parallel worker processes (same bytes for any count)."""
-    import time
-
-    from assist.engine import workers as pool
-    from assist.engine.control import RenderError
-    from assist.engine.render import Renderer
-    from assist.engine.scene import Scene
-    from assist.sinks import runinfo
-    from assist.sinks.wavfile import FileSink, plan_files
-    from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
-
-    nw = _workers(workers)
-    if fmt not in ("wav", "cu8"):
-        raise typer.BadParameter("--format must be wav or cu8")
-    if rf64 and fmt != "wav":
-        raise typer.BadParameter("--rf64 goes with --format wav")
-    kind = "rf64" if rf64 else fmt
-    r = _resolve(scenario, set_)
-    sc = r.scenario
-    t0 = parse_iso(sc.clock.start)
-    a = parse_time(t_from, t0) if t_from else t0
-    dur = parse_duration(duration) if duration else t0 + sc.clock.duration - a
-    if dur <= 0:
-        raise typer.BadParameter("nothing to render: the window is empty")
-    try:
-        rd = Renderer(Scene(sc))
-    except (RenderError, ValueError, NotImplementedError) as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(2) from e
-    n0, n = sample_at(a, rd.fs), round(dur * rd.fs)
-    files = plan_files(out, kind, rd.fc_hz, rd.fs, sc.station.tz, n0, n)
-    run_path = out / "run.json"
-    existing = [p for p in [*(f.path for f in files), run_path] if p.exists()]
-    if existing and not force:
-        typer.echo(f"error: {existing[0]} exists (use --force to overwrite)", err=True)
-        raise typer.Exit(1)
-    nw = min(nw, len(pool.tasks(n0, n, rd.fs)))
-    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, kind, n0, n, files, "rendering", workers=nw))
-    typer.echo(
-        f"rendering {n / rd.fs:.1f} s from {format_iso(n0 / rd.fs, 3)} into {len(files)} file(s) in {out}"
-        f" ({nw} worker{'s' if nw > 1 else ''})",
-        err=True,
-    )
-    sink = FileSink(files, kind, rd.fs)
-    tic = time.perf_counter()
-    report = 60 * rd.fs
-    stream = pool.iter_u8(r.canonical, Path.cwd(), n0, n, rd.fs, nw) if nw > 1 else rd.iter_u8(n0, n)
-    try:
-        for chunk in stream:
-            sink.write(chunk)
-            if sink.written >= report or sink.written == n:
-                done_s = sink.written / rd.fs
-                speed = done_s / (time.perf_counter() - tic)
-                typer.echo(f"  {done_s:7.1f} / {n / rd.fs:.1f} s  ({speed:.1f}x real time)", err=True)
-                report += 60 * rd.fs
-        sink.close()
-    except RenderError as e:
-        sink.close_quietly()
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(2) from e
-    elapsed = time.perf_counter() - tic
-    info = runinfo.run_info(r, rd, kind, n0, n, files, "complete", workers=nw, render_seconds=round(elapsed, 3))
-    runinfo.write_run_json(run_path, info)
-    for f in files:
-        typer.echo(str(f.path))
-    typer.echo(f"done: {n / rd.fs / elapsed:.1f}x real time, scenario hash {r.hash}", err=True)
-
-
-@app.command()
-def fft(
-    scenario: ScenarioArg,
-    out: Annotated[Path, typer.Option("-o", "--out", help="Output directory (PNG + run.json).")] = Path("out/fft"),
+    out: Annotated[
+        Path | None,
+        typer.Option("-o", "--out", help="Output directory: files and run.json (default: out/<scenario>)."),
+    ] = None,
     t_from: FromOpt = None,
     duration: Annotated[
         str | None,
-        typer.Option(help="Stream to plot, e.g. 90s, 1h (default: the fft sink's `duration`; one is required)."),
+        typer.Option(
+            help="Stream length, e.g. 90s, 16min, 2h (default: to the end of the scenario clock; a serving sink "
+            "is endless)."
+        ),
     ] = None,
-    force: Annotated[bool, typer.Option("--force", help="Overwrite an existing PNG.")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing output files.")] = False,
     workers: WorkersOpt = None,
     set_: SetOpt = None,
+    plugin: PluginOpt = None,
 ) -> None:
-    """Waterfall PNG of the stream, from the scenario's `fft` sink (width, row_seconds, duration, min_db, max_db)."""
-    import time
+    """Run the scenario into its sinks: IQ files (wav, cu8), a waterfall PNG (fft), or a server (rtl_tcp).
 
-    from assist.engine import workers as pool
-    from assist.engine.control import RenderError
-    from assist.engine.render import Renderer
-    from assist.engine.scene import Scene
-    from assist.sinks import runinfo
-    from assist.sinks.fft import FftSpec, WaterfallSink, waterfall_name
-    from assist.sinks.wavfile import OutFile
-    from assist.timebase import format_iso, parse_iso, parse_time, sample_at
+    Sinks and their settings come from the scenario's `sinks:` list; `--set 'sinks\\[wav].rf64=true'` changes one.
+    File sinks render as fast as the machine allows, in parallel worker processes (same bytes for any count), and
+    several can share a run. A serving sink runs alone, until Ctrl-C or --duration: with `clock.start: now` and
+    realtime pacing the stream is live (sample time equals wall time), otherwise it starts at --from.
+    """
+    from assist.sinks import runner
 
     nw = _workers(workers)
-    r = _resolve(scenario, set_)
-    sc = r.scenario
-    cfg = next((s["fft"] or {} for s in sc.sinks if "fft" in s), None)
-    if cfg is None:
-        typer.echo("error: the scenario has no `fft` entry in `sinks:`", err=True)
-        raise typer.Exit(2)
-    try:
-        spec = FftSpec.from_dict(cfg, duration)
-        rd = Renderer(Scene(sc))
-        sink = WaterfallSink(spec, rd.fs)
-    except (RenderError, ValueError, NotImplementedError) as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(2) from e
-    t0 = parse_iso(sc.clock.start)
-    a = parse_time(t_from, t0) if t_from else t0
-    n0, n = sample_at(a, rd.fs), sink.n_samples
-    png = out / waterfall_name(rd.fc_hz, n0 / rd.fs, sc.station.tz)
-    run_path = out / "run.json"
-    existing = [p for p in (png, run_path) if p.exists()]
-    if existing and not force:
-        typer.echo(f"error: {existing[0]} exists (use --force to overwrite)", err=True)
-        raise typer.Exit(1)
-    files = [OutFile(png, 0, n, n0)]
-    nw = min(nw, len(pool.tasks(n0, n, rd.fs)))
-    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, "fft", n0, n, files, "rendering", workers=nw))
-    typer.echo(
-        f"plotting {n / rd.fs:.1f} s from {format_iso(n0 / rd.fs, 3)}: {sink.width} x {sink.height} px, "
-        f"{sink.row_samples / rd.fs:.3f} s per row ({nw} worker{'s' if nw > 1 else ''})",
-        err=True,
+    r = _resolve(scenario, set_, plugin)
+    opt = runner.RunOptions(
+        out if out is not None else Path("out") / scenario.stem, tuple(sink or ()), t_from, duration, nw, force
     )
-    tic = time.perf_counter()
-    stream = pool.iter_u8(r.canonical, Path.cwd(), n0, n, rd.fs, nw) if nw > 1 else rd.iter_u8(n0, n)
-    status, code = "complete", 0
     try:
-        for chunk in stream:
-            sink.write(chunk)
-        sink.close()
-    except KeyboardInterrupt:
-        status = "stopped"
-    except RenderError as e:
-        status, code = "error", 2
+        code = runner.run(r, opt, lambda m: typer.echo(m, err=True), typer.echo)
+    except runner.RunError as e:
         typer.echo(f"error: {e}", err=True)
-    elapsed = time.perf_counter() - tic
-    if sink.rows:
-        sink.save(png)
-    info = runinfo.run_info(
-        r,
-        rd,
-        "fft",
-        n0,
-        n,
-        files if sink.rows else [],
-        status,
-        workers=nw,
-        render_seconds=round(elapsed, 3),
-        fft=sink.info(),
-    )
-    runinfo.write_run_json(run_path, info)
-    if sink.rows:
-        typer.echo(str(png))
-    if sink.min_db is not None:
-        typer.echo(
-            f"{status}: {sink.rows}/{sink.height} rows, levels {sink.min_db:.1f}..{sink.max_db:.1f} dB", err=True
-        )
-    else:
-        typer.echo(f"{status}: {sink.rows}/{sink.height} rows (level not yet calibrated)", err=True)
+        raise typer.Exit(e.code) from e
     if code:
         raise typer.Exit(code)
 
@@ -443,6 +340,7 @@ def bench(
     workers: WorkersOpt = None,
     out: Annotated[Path, typer.Option("-o", "--out", help="Directory for <scenario>.json.")] = Path("out/bench"),
     set_: SetOpt = None,
+    plugin: PluginOpt = None,
 ) -> None:
     """Render speed vs real time, on one worker (one core) and on N, without writing IQ (plan §4.5)."""
     import json
@@ -452,7 +350,7 @@ def bench(
     from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
 
     nw = _workers(workers)
-    r = _resolve(scenario, set_)
+    r = _resolve(scenario, set_, plugin)
     sc = r.scenario
     fs = int(sc.frontend.fs_hz)
     t0 = parse_iso(sc.clock.start)
@@ -489,117 +387,6 @@ def bench(
         raise typer.Exit(1)
 
 
-def _starts_now(scenario: Path, sets: list[str] | None) -> bool:
-    """Whether the scenario's clock starts `now` (a live stream); call after _resolve has accepted it."""
-    from assist.config.loader import load_scenario
-
-    clock = load_scenario(scenario, tuple(sets or ())).get("clock") or {}
-    return isinstance(clock, dict) and str(clock.get("start", "now")) == "now"
-
-
-def _rtl_tcp_sink(sinks: list[dict[str, Any]], host: str | None, port: int | None) -> tuple[str, int]:
-    """Listen address: the options, else the scenario's `rtl_tcp` sink, else 127.0.0.1:1234."""
-    cfg = next((s["rtl_tcp"] for s in sinks if isinstance(s.get("rtl_tcp"), dict)), {})
-    return host or str(cfg.get("host") or "127.0.0.1"), port if port is not None else int(cfg.get("port", 1234))
-
-
-@app.command()
-def serve(
-    scenario: ScenarioArg,
-    host: Annotated[
-        str | None, typer.Option(help="Listen address (default: the scenario's rtl_tcp sink, else 127.0.0.1).")
-    ] = None,
-    port: Annotated[
-        int | None, typer.Option(help="TCP port (default: the scenario's rtl_tcp sink, else 1234).")
-    ] = None,
-    pacing: Annotated[str, typer.Option(help="realtime, or unpaced (as fast as the clients read).")] = "realtime",
-    t_from: FromOpt = None,
-    duration: Annotated[
-        str | None, typer.Option(help="Stop after this much stream, e.g. 1h (default: endless).")
-    ] = None,
-    lookahead: Annotated[str, typer.Option(help="Render-ahead ring, e.g. 1s.")] = "1s",
-    out: Annotated[Path, typer.Option("-o", "--out", help="Directory for run.json.")] = Path("out/serve"),
-    set_: SetOpt = None,
-) -> None:
-    """Serve the station's uint8 IQ stream over rtl_tcp (read-only clients such as SDR++). Ctrl-C stops it.
-
-    With `clock.start: now` and realtime pacing the stream is live: it starts at the next whole second after the
-    pre-roll, and sample time equals wall time. Otherwise it starts at --from (default: the clock start).
-    """
-    import asyncio
-    import logging
-    import math
-    import time
-
-    from assist.engine.control import RenderError
-    from assist.engine.render import Renderer
-    from assist.engine.scene import Scene
-    from assist.sinks import runinfo
-    from assist.sinks.rtltcp import CHUNK_SAMPLES, PACINGS, RenderAhead, RtlTcpServer, live_start, stderr_handler
-    from assist.timebase import format_iso, parse_duration, parse_iso, parse_time, sample_at
-
-    if pacing not in PACINGS:
-        raise typer.BadParameter("--pacing must be realtime or unpaced")
-    look = parse_duration(lookahead)
-    if look <= 0:
-        raise typer.BadParameter("--lookahead must be positive")
-    r = _resolve(scenario, set_)
-    sc = r.scenario
-    host_, port_ = _rtl_tcp_sink(sc.sinks, host, port)
-    live = pacing == "realtime" and t_from is None and _starts_now(scenario, set_)
-    try:
-        rd = Renderer(Scene(sc), prefetch=True)
-    except (RenderError, ValueError, NotImplementedError) as e:
-        typer.echo(f"error: {e}", err=True)
-        raise typer.Exit(2) from e
-    n = round(parse_duration(duration) * rd.fs) if duration else None
-    if n is not None and n <= 0:
-        raise typer.BadParameter("--duration must be positive")
-    t0 = parse_iso(sc.clock.start)
-    wall = live_start(time.time(), look) if live else None
-    n0 = wall * rd.fs if wall is not None else sample_at(parse_time(t_from, t0) if t_from else t0, rd.fs)
-    ahead = RenderAhead(rd, n0, n, max(1, math.ceil(look * rd.fs / CHUNK_SAMPLES)), piece=10 * rd.hop)
-    server = RtlTcpServer(ahead, rd.fs, rd.fc_hz, host=host_, port=port_, pacing=pacing, wall_start=wall)
-    cfg = {"host": host_, "port": port_, "pacing": pacing, "live": live, "lookahead_s": look}
-    run_path = out / "run.json"
-    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, "rtl_tcp", n0, n, [], "serving", serve=cfg))
-    typer.echo(f"serving from {format_iso(n0 / rd.fs, 3)}{' (live)' if live else ''}; run.json in {out}", err=True)
-    logger = logging.getLogger("assist.serve")
-    handler = stderr_handler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    status, code = "complete" if n is not None else "stopped", 0
-    try:
-        asyncio.run(server.serve())
-    except KeyboardInterrupt:
-        status = "stopped"
-    except RenderError as e:
-        status, code = "error", 2
-        typer.echo(f"error: {e}", err=True)
-    except OSError as e:
-        status, code = "error", 1
-        typer.echo(f"error: {e}", err=True)
-    finally:
-        logger.removeHandler(handler)
-    st = server.stats
-    stream = {
-        "samples": st.samples,
-        "seconds": st.samples / rd.fs,
-        "stalls": st.stalls,
-        "stall_s": round(st.stall_s, 3),
-        "clients": st.clients,
-        "slow_disconnects": st.slow_disconnects,
-    }
-    runinfo.write_run_json(run_path, runinfo.run_info(r, rd, "rtl_tcp", n0, n, [], status, serve=cfg, stream=stream))
-    typer.echo(
-        f"{status}: {st.samples / rd.fs:.1f} s streamed, {st.stalls} stall(s), {st.clients} client(s), "
-        f"scenario hash {r.hash}",
-        err=True,
-    )
-    if code:
-        raise typer.Exit(code)
-
-
 def _fetch_feeds(feeds: str, out: Path) -> None:
     from assist.orbits.elements import fetch as do_fetch
 
@@ -631,3 +418,70 @@ def fetch(
 ) -> None:
     """Same as `assist fetch_omm`."""
     _fetch_feeds(feeds, out)
+
+
+def _module_detail(category: str, cls: Any) -> str:
+    if category == "signal":
+        return str(cls.mode)
+    if category == "platform":
+        return "fixed" if cls.fixed else "geometry"
+    return "serving" if cls.serving else "push"
+
+
+@plugins_app.command(name="list")
+def plugins_list(
+    scenario: Annotated[
+        Path | None,
+        typer.Argument(help="Show what this scenario would load (its `plugins:` list). Nothing is rendered."),
+    ] = None,
+    set_: SetOpt = None,
+    plugin: PluginOpt = None,
+) -> None:
+    """Registered signals, platforms and sinks with their origin (core, or the plugin that provides them).
+
+    Without a scenario (and without --plugin) only the core modules are listed: nothing else is ever loaded. With a
+    scenario, its plugins are loaded and checked (found, importable, API version, name clashes); the rest of the
+    scenario is not validated.
+    """
+    from assist import plugins, registry
+    from assist.config.loader import ConfigError, load_scenario
+
+    entries: list[Any] = []
+    dirs: list[Path] = [Path.cwd()]
+    try:
+        if scenario is not None:
+            listed = load_scenario(scenario, tuple(set_ or ())).get("plugins") or []
+            if not isinstance(listed, list):
+                raise ConfigError(f"plugins must be a list, got {listed!r}")
+            entries += listed
+            dirs.append(scenario.resolve().parent)
+        entries += [plugins.from_cli(p) for p in plugin or ()]
+        resolved = plugins.activate(entries, dirs)
+    except (ConfigError, plugins.PluginError, FileNotFoundError, ValueError) as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(2) from e
+    rows = [
+        (cat, name, _module_detail(cat, reg.get(name)), reg.origin(name))
+        for cat, reg in registry.ALL.items()
+        for name in reg.names()
+    ]
+    w = max(len(r[1]) for r in rows)
+    for cat in registry.ALL:
+        typer.echo(f"{cat}s")
+        for _, name, detail, origin in (r for r in rows if r[0] == cat):
+            typer.echo(f"  {name.ljust(w)}  {detail.ljust(10)}  {origin}")
+    typer.echo(f"plugins (assist.api {plugins.API_VERSION})")
+    if not resolved:
+        typer.echo("  none" if scenario is None and not plugin else "  none listed")
+    for p, e in zip(plugins.active(), resolved, strict=True):
+        what = ", ".join(f"{cat} {name}" for cat, name in p.registered)
+        facts = [f"version {p.version or '-'}", f"api {p.api}"]
+        if p.sha256 is not None:
+            facts.append(f"sha256 {p.sha256[:12]}")
+        if p.distribution is not None:
+            facts.append(f"distribution {p.distribution}")
+        typer.echo(f"  {p.label}  ({', '.join(facts)})")
+        typer.echo(
+            f"    {'path' if 'path' in e else 'module'}: {getattr(p.module, '__file__', None) or p.module.__name__}"
+        )
+        typer.echo(f"    registers: {what}")

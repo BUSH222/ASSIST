@@ -337,11 +337,11 @@ def test_ppm_must_be_zero(tmp: Path) -> None:
         _scene(tmp, [], "ppm", frontend={"ppm": 1.5})
 
 
-def test_unimplemented_signal_kinds_are_refused(tmp: Path) -> None:
+def test_unknown_signal_kinds_are_refused(tmp: Path) -> None:
     src = _cw("o1", 137.9e6)
     src["emitters"][0]["signal"] = {"kind": "bank_clip"}
-    with pytest.raises(NotImplementedError, match="later"):
-        Renderer(_scene(tmp, [src], "bank_clip"))
+    with pytest.raises(ValueError, match="unknown signal kind 'bank_clip'"):
+        _scene(tmp, [src], "bank_clip")
 
 
 def test_cpp_and_numpy_engines_agree(zombie: Scene) -> None:

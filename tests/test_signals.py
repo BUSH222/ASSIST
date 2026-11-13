@@ -63,7 +63,6 @@ def test_params_get_defaults_and_reject_typos() -> None:
     assert check_params("sdpsk", {})["rs"] == 4800 and check_params("sdpsk", {})["alpha"] == 0.4
     assert check_params("oqpsk_burst", {})["blocks"] == [4, 5]
     assert check_params("lora", {})["sf"] == [7, 12] and check_params("lora", {})["payload_bytes"] == [10, 60]
-    assert check_params("bank_clip", {"anything": 1}) == {"anything": 1}  # not implemented: unchecked
     with pytest.raises(ValidationError, match="extra"):
         check_params("oqpsk", {"rolloff": 0.5})
     with pytest.raises(ValidationError, match="span must be even"):
@@ -307,7 +306,7 @@ def test_lora_schedule_draws_are_keyed_and_random_access() -> None:
         return d, prm
 
     maker = EventMaker(draw, upper)
-    sch = ExpGaps(KeyedRng(3), "s", "lora", DurationDist(), 180.0, 20.0, maker)
+    sch = ExpGaps(KeyedRng(3).scope("s", "lora"), DurationDist(), 180.0, 20.0, maker)
     evs = sch.events(T0, T0 + 6 * 3600)
     assert len(evs) > 60
     for e in evs:
@@ -318,7 +317,7 @@ def test_lora_schedule_draws_are_keyed_and_random_access() -> None:
     gaps = np.array([b.start - a.end for a, b in itertools.pairwise(evs)])
     assert np.all(gaps[gaps > 0] >= 20 - 1e-9)
     mid = sch.events(T0 + 7200, T0 + 9000)  # a later window on its own gives the same events
-    again = ExpGaps(KeyedRng(3), "s", "lora", DurationDist(), 180.0, 20.0, maker).events(T0 + 7200, T0 + 9000)
+    again = ExpGaps(KeyedRng(3).scope("s", "lora"), DurationDist(), 180.0, 20.0, maker).events(T0 + 7200, T0 + 9000)
     assert [(e.start, e.params) for e in mid] == [(e.start, e.params) for e in again]
     with pytest.raises(ValueError, match="min_gap_s"):
-        ExpGaps(KeyedRng(3), "s", "lora", DurationDist(), 180.0, 2.0, maker)  # SF12 bursts last up to 2.6 s
+        ExpGaps(KeyedRng(3).scope("s", "lora"), DurationDist(), 180.0, 2.0, maker)  # SF12 bursts last up to 2.6 s

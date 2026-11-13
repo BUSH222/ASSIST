@@ -1,8 +1,8 @@
 """Signal kinds (plan §3.4, §5).
 
-M2 knows every kind by name so scenarios can be written early. A kind's parameters are checked, and it can be
-rendered, from the milestone that implements it. Parameters are a pydantic model per kind (unknown keys are
-errors); validation fills in the defaults, so a resolved scenario lists every parameter.
+A kind is a `Signal` subclass registered under a name with `@register_signal("name")`; the core kinds live in this
+package, external ones in modules a scenario lists under `plugins:` (PLAN.md). Parameters are a pydantic model per
+kind (unknown keys are errors); validation fills in the defaults, so a resolved scenario lists every parameter.
 
 Three modes:
 - `continuous`: `render(n0, n, rate)` gives samples at any absolute narrow index (cw, oqpsk, oqpsk_burst, sdpsk,
@@ -10,20 +10,24 @@ Three modes:
 - `event`: the emitter's schedule places events; `draw_event` draws an event's parameters and duration (from the
   schedule's keyed slot stream; a duration of None means the schedule's duration distribution decides) and
   `render_events` renders the events overlapping a window (lora, d8psk, gfsk, am);
-- `wideband` (M7): interference inside the receiver, rendered at the full sample rate in the time domain and added
+- `wideband`: interference inside the receiver, rendered at the full sample rate in the time domain and added
   before the ADC, bypassing the synthesiser and the receiver response (noise_comb, the USB humps).
 
-Random content (payload bits, frames, burst symbols) comes from `Keys`: 64-bit keys per (source, emitter, purpose)
-for the counter-based `random_bytes` kernel, whose counter is an absolute index (frame, symbol chunk, segment, event
-start), so any window is rendered on its own (plan §3.2).
+Random content (payload bits, frames, burst symbols) comes from `Keys`, the emitter's `RngScope`: 64-bit keys per
+(source, emitter, purpose) for the counter-based `random_bytes` kernel, whose counter is an absolute index (frame,
+symbol chunk, segment, event start), so any window is rendered on its own (plan §3.2); `Keys.stream` gives a numpy
+Generator under the same prefix for per-event draws. A signal never holds the seed or the `KeyedRng` itself.
 """
 
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
+
+from assist import registry
+from assist.rng import RngScope
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -38,32 +42,44 @@ if TYPE_CHECKING:
 class SignalKind:
     name: str
     mode: Literal["continuous", "event", "wideband"]
-    milestone: str
 
 
-KINDS = {
-    k.name: k
-    for k in (
-        SignalKind("cw", "continuous", "M2"),
-        SignalKind("oqpsk", "continuous", "M6"),
-        SignalKind("oqpsk_burst", "continuous", "M6"),
-        SignalKind("sdpsk", "continuous", "M6"),
-        SignalKind("lora", "event", "M6"),
-        SignalKind("d8psk", "event", "M7"),
-        SignalKind("gfsk", "event", "M7"),
-        SignalKind("am", "event", "M7"),
-        SignalKind("noise_band", "continuous", "M7"),
-        SignalKind("noise_comb", "wideband", "M7"),
-        SignalKind("bank_clip", "event", "later (skipped in M7: everything synthetic for now)"),
-    )
-}
-IMPLEMENTED = {"cw", "oqpsk", "oqpsk_burst", "sdpsk", "lora", "d8psk", "gfsk", "am", "noise_band", "noise_comb"}
+class _Register(Protocol):
+    def __call__[C: type[Signal]](self, cls: C, /) -> C: ...
+
+
+def register_signal(name: str) -> _Register:
+    """Class decorator: make a `Signal` subclass available as signal kind `name`.
+
+    Core kinds and external ones use the same decorator. An external kind can be used by a scenario that lists its
+    module under `plugins:` (see `assist.plugins`)."""
+    reg = registry.signals.register(name)
+
+    def deco[C: type[Signal]](cls: C, /) -> C:
+        if not (isinstance(cls, type) and issubclass(cls, Signal)):
+            raise TypeError(f"register_signal({name!r}) needs a Signal subclass, got {cls!r}")
+        if not isinstance(getattr(cls, "Params", None), type) or not issubclass(cls.Params, SignalParams):
+            raise TypeError(f"signal {name!r}: {cls.__name__}.Params must be a SignalParams subclass")
+        if cls.mode not in ("continuous", "event", "wideband"):
+            raise TypeError(f"signal {name!r}: mode must be continuous, event or wideband, got {cls.mode!r}")
+        setattr(cls, "kind", name)  # noqa: B010 (a ClassVar of the subclass, set through the type variable)
+        reg(cls)
+        return cls
+
+    return deco
+
+
+def signal_class(kind: str) -> type[Signal]:
+    try:
+        cls = registry.signals.get(kind)
+    except registry.RegistryError as e:
+        raise ValueError(str(e)) from None
+    assert issubclass(cls, Signal)
+    return cls
 
 
 def get_kind(name: str) -> SignalKind:
-    if name not in KINDS:
-        raise ValueError(f"unknown signal kind {name!r} (known: {', '.join(KINDS)})")
-    return KINDS[name]
+    return SignalKind(name, signal_class(name).mode)
 
 
 class SignalParams(BaseModel):
@@ -72,16 +88,20 @@ class SignalParams(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-@dataclass(frozen=True)
-class Keys:
-    """Random streams of one emitter: (source_id, emitter_id, purpose, ...) keys from the scenario seed."""
+class Keys(RngScope):
+    """Random streams of one emitter: the scope (source_id, emitter_id), so every key is
+    (source_id, emitter_id, purpose, ...) from the scenario seed. `key64` feeds the counter-based kernels, `stream`
+    gives a numpy Generator (see `RngScope`)."""
 
-    rng: KeyedRng
-    source_id: str
-    emitter_id: str
+    __slots__ = ("emitter_id", "source_id")
 
-    def key64(self, *parts: str | int) -> int:
-        return self.rng.key64(self.source_id, self.emitter_id, *parts)
+    def __init__(self, rng: KeyedRng, source_id: str, emitter_id: str, namespace: tuple[str | int, ...] = ()) -> None:
+        super().__init__(rng, (*namespace, source_id, emitter_id))
+        self.source_id, self.emitter_id = source_id, emitter_id
+
+    def namespaced(self, *namespace: str | int) -> Keys:
+        """The same emitter's keys under a namespace: (*namespace, source_id, emitter_id, ...)."""
+        return Keys(self._rng, self.source_id, self.emitter_id, namespace)
 
 
 class Signal(ABC):
@@ -135,7 +155,7 @@ class Signal(ABC):
         """Event signals: the time span outside which the event's samples are exactly 0 (filter tails included)."""
         return ev.start, ev.end
 
-    # --- wideband signals (M7) ---
+    # --- wideband signals ---
 
     def render_wide(
         self, events: list[Event], h0: int, nhops: int, hop: int, fs: int, n0_w: float, f_offset_hz: float = 0.0
@@ -145,36 +165,17 @@ class Signal(ABC):
         raise NotImplementedError(f"{self.kind} is not a wideband signal")
 
 
-def signal_class(kind: str) -> type[Signal]:
-    k = get_kind(kind)
-    if kind not in IMPLEMENTED:
-        raise NotImplementedError(f"signal kind {kind!r} is rendered from milestone {k.milestone}")
-    from assist.signals import am, cw, d8psk, gfsk, lora, noise, oqpsk, oqpsk_burst, sdpsk
-
-    classes: dict[str, type[Signal]] = {
-        "cw": cw.CW,
-        "oqpsk": oqpsk.OQPSK,
-        "oqpsk_burst": oqpsk_burst.OQPSKBurst,
-        "sdpsk": sdpsk.SDPSK,
-        "lora": lora.LoRa,
-        "d8psk": d8psk.D8PSK,
-        "gfsk": gfsk.GFSK,
-        "am": am.AM,
-        "noise_band": noise.NoiseBand,
-        "noise_comb": noise.NoiseComb,
-    }
-    return classes[kind]
-
-
 def check_params(kind: str, params: dict[str, Any]) -> dict[str, Any]:
-    """The kind's parameters validated, with defaults filled in (kinds not implemented yet: unchanged)."""
-    if kind not in IMPLEMENTED:
-        return params
+    """The kind's parameters validated, with defaults filled in."""
     return signal_class(kind).Params.model_validate(params).model_dump(mode="json")
 
 
 def make_signal(kind: str, params: dict[str, Any], keys: Keys, dsp: ModuleType) -> Signal:
+    """The signal of one emitter. `keys` is the emitter's scope (source_id, emitter_id); an external kind gets it
+    under ("signal", kind), so its keys cannot meet a core kind's or another module's."""
     cls = signal_class(kind)
+    if registry.signals.is_external(kind):
+        keys = keys.namespaced("signal", kind)
     return cls(cls.Params.model_validate(params), keys, dsp)
 
 

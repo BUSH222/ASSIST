@@ -48,7 +48,7 @@ def test_band_fallback_sigma_matches_profile() -> None:
 def test_noise_density_is_k_t_sys() -> None:
     """Flat noise: complex power per sample = k T_sys fs (in mW), and the ADC gain maps it to sigma counts."""
     t_sys = 727.0
-    fe = Frontend(NoiseSpec(None, 26.7, "test"), t_sys, FS, FS // 100, FS // 50, KeyedRng(1))
+    fe = Frontend(NoiseSpec(None, 26.7, "test"), t_sys, FS, FS // 100, FS // 50, KeyedRng(1).scope())
     y = np.concatenate([fe.noise(h) for h in range(1000, 1040)])
     p_mw = 1.380649e-23 * t_sys * FS * 1000
     assert np.mean(np.abs(y) ** 2) == pytest.approx(p_mw, rel=0.01)
@@ -56,16 +56,16 @@ def test_noise_density_is_k_t_sys() -> None:
 
 
 def test_noise_is_keyed_by_absolute_hop() -> None:
-    a = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(5))
-    b = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(5))
+    a = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(5).scope())
+    b = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(5).scope())
     seq = [a.noise(h) for h in range(7, 10)]
     np.testing.assert_array_equal(b.noise(9), seq[2])  # hop 9 on its own = hop 9 after 7 and 8
-    c = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(6))
+    c = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(6).scope())
     assert not np.array_equal(c.noise(9), seq[2])
 
 
 def test_adc_rounds_clips_and_interleaves() -> None:
-    fe = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(1))
+    fe = Frontend(NoiseSpec(None, 26.7, "t"), 700.0, FS, FS // 100, FS // 50, KeyedRng(1).scope())
     g = fe.gain
     y = np.array([0, (1 + 2j) / g, (-200 + 300j) / g, (0.4 - 0.6j) / g], dtype=np.complex64)
     u = fe.adc(y)

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from assist import __version__
+from assist import __version__, plugins
 from assist.config import schema as S
 from assist.config.loader import ConfigError, band_dir, load_band, load_scenario
 from assist.config.randexpr import draw_all
@@ -38,6 +38,7 @@ from assist.orbits.elements import (
     staleness_warning,
 )
 from assist.orbits.synthetic import RE_KM, PassRequest, solve_pass
+from assist.platforms.base import platform_class
 from assist.rng import KeyedRng
 from assist.station import DEFAULT_FILE, Station, load_station
 from assist.timebase import format_iso, parse_iso, parse_time
@@ -51,6 +52,7 @@ METEOR_AUTO = "meteor_auto"  # the per-satellite METEOR calibration of the sourc
 class Resolved:
     scenario: S.Scenario
     warnings: list[str] = field(default_factory=list)
+    clock_now: bool = False  # the scenario's clock said `start: now` (a live stream starts at the wall clock)
 
     @property
     def canonical(self) -> str:
@@ -58,14 +60,29 @@ class Resolved:
 
     @property
     def hash(self) -> str:
-        return hashlib.sha256(self.canonical.encode()).hexdigest()
+        """sha256 of the canonical JSON without the `sinks`: the hash names what is rendered, not where it goes, so
+        changing a sink setting (`--set 'sinks[wav].rf64=true'`) leaves it alone."""
+        doc = json.loads(self.canonical)
+        doc["sinks"] = []
+        text = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(text.encode()).hexdigest()
 
     def pretty(self) -> str:
         return json.dumps(json.loads(self.canonical), indent=1, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def canonical_json(sc: S.Scenario) -> str:
-    return json.dumps(sc.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    """The resolved scenario as canonical JSON (the scenario hash is its sha256). An empty `plugins` list is left
+    out, so scenarios that use only core modules keep the hash they had before plugins existed."""
+    doc = sc.model_dump(mode="json")
+    if doc["plugins"]:
+        doc["plugins"] = [{k: v for k, v in p.items() if v is not None} for p in doc["plugins"]]
+    else:
+        del doc["plugins"]
+    for src in doc["sources"]:  # likewise the core platforms, which have no parameters
+        if not src["platform_params"]:
+            del src["platform_params"]
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def dir_hash(path: Path, exclude: tuple[str, ...] = ()) -> str:
@@ -241,7 +258,7 @@ def _set_of(o: S.CatalogOrbit) -> ElementSet:
 
 
 def _fixed_level(cx: _Ctx, src: S.Source, e: S.Emitter) -> S.Level | None:
-    """Ground/local: the received level as rx_dbm (from cn0_dbhz against k T_sys, or rx_dbm)."""
+    """Platforms with a received level: the level as rx_dbm (from cn0_dbhz against k T_sys, or rx_dbm)."""
     lv = e.level
     if lv is None or lv.resolved_from is not None:
         return lv
@@ -260,7 +277,7 @@ def _fixed_level(cx: _Ctx, src: S.Source, e: S.Emitter) -> S.Level | None:
 
 
 def _level(cx: _Ctx, src: S.Source, orbit: Any, e: S.Emitter, station_alt_m: float) -> S.Level | None:
-    if src.platform != "satellite":
+    if platform_class(src.platform).level_mode == "received":
         return _fixed_level(cx, src, e)
     lv = e.lvl
     if lv.resolved_from is not None:
@@ -347,14 +364,26 @@ def _emitter(
     return e.model_copy(update=upd)
 
 
-def resolve_document(doc: dict[str, Any], base: Path, now: float | None = None) -> Resolved:
-    """Resolve a merged document (after load_scenario). `base` is the directory relative paths start from."""
+def resolve_document(
+    doc: dict[str, Any], base: Path, now: float | None = None, scenario_dir: Path | None = None
+) -> Resolved:
+    """Resolve a merged document (after load_scenario). `base` is the directory relative paths start from;
+    `scenario_dir` (the scenario file's directory) is where a plugin file is looked for when it is not under `base`.
+
+    The plugins the document lists are loaded first: their kinds must be known before the schema checks them."""
+    try:
+        entries = plugins.activate(doc.get("plugins"), (base, scenario_dir))
+    except plugins.PluginError as e:
+        raise ConfigError(str(e)) from e
+    if "plugins" in doc:
+        doc = {**doc, "plugins": entries}
     seed = doc.get("seed", 0)
     if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
         raise ConfigError(f"seed must be an integer >= 0, got {seed!r}")
     sc = S.Scenario.model_validate(draw_all(doc, KeyedRng(seed)))
     band = load_band(sc.band)
-    if sc.clock.start == "now":
+    clock_now = sc.clock.start == "now"
+    if clock_now:
         t_now = math.floor(time.time() if now is None else now)
         sc = sc.model_copy(update={"clock": sc.clock.model_copy(update={"start": format_iso(t_now)})})
     sc = sc.model_copy(update={"station": _station(sc.station, base)})
@@ -363,7 +392,7 @@ def resolve_document(doc: dict[str, Any], base: Path, now: float | None = None) 
     station = Station(sc.station.lat, sc.station.lon, sc.station.alt_m, sc.station.tz)
     sources = []
     for src in sc.sources:
-        if src.platform == "satellite":
+        if platform_class(src.platform).needs_orbit:
             orbit, catalog = _orbit(cx, src, station)
         else:
             orbit, catalog = None, False
@@ -398,7 +427,7 @@ def resolve_document(doc: dict[str, Any], base: Path, now: float | None = None) 
     )
     # Round trip through validation, so the result is exactly what re-reading the JSON gives.
     sc = S.Scenario.model_validate(json.loads(canonical_json(sc)))
-    return Resolved(sc, cx.warnings)
+    return Resolved(sc, cx.warnings, clock_now)
 
 
 def _check_norads(sources: list[S.Source]) -> None:
@@ -415,10 +444,21 @@ def _check_norads(sources: list[S.Source]) -> None:
 
 
 def resolve(
-    path: str | Path, sets: tuple[str, ...] | list[str] = (), now: float | None = None, base: Path | None = None
+    path: str | Path,
+    sets: tuple[str, ...] | list[str] = (),
+    now: float | None = None,
+    base: Path | None = None,
+    extra_plugins: tuple[str, ...] | list[str] = (),
 ) -> Resolved:
-    """Load and resolve a scenario file (YAML or JSON, including an already resolved one)."""
-    return resolve_document(load_scenario(path, sets), base or Path.cwd(), now)
+    """Load and resolve a scenario file (YAML or JSON, including an already resolved one). `extra_plugins`
+    (`--plugin`) are added to the scenario's `plugins:` list, so they are part of the resolved scenario."""
+    doc = load_scenario(path, sets)
+    if extra_plugins:
+        listed = doc.get("plugins") or []
+        if not isinstance(listed, list):
+            raise ConfigError(f"plugins must be a list, got {listed!r}")
+        doc["plugins"] = [*listed, *(plugins.from_cli(p) for p in extra_plugins)]
+    return resolve_document(doc, base or Path.cwd(), now, Path(path).resolve().parent)
 
 
 def utc_now() -> float:

@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from assist import waterfall as wf
 from assist.cli import app
+from assist.sinks.base import check_sinks
 from assist.sinks.fft import FftSpec, WaterfallSink
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,13 +22,21 @@ def _noise(n: int, seed: int = 0) -> np.ndarray:
     return np.random.default_rng(seed).integers(0, 256, 2 * n, dtype=np.uint8)
 
 
-def test_spec_requires_duration_and_validates() -> None:
-    with pytest.raises(ValueError, match="needs a duration"):
-        FftSpec.from_dict({})
-    with pytest.raises(ValueError, match="needs a duration"):
-        FftSpec.from_dict({"width": 1024, "row_seconds": 1})
-    assert FftSpec.from_dict({}, "10s").duration == 10.0  # --duration alone is enough
-    assert FftSpec.from_dict({"duration": "1min"}, "10s").duration == 10.0  # and wins over the sink's
+def test_spec_duration_and_validation() -> None:
+    assert FftSpec.from_dict({}).duration is None  # no limit of its own: the stream's length applies
+    assert FftSpec.from_dict({"width": 1024, "row_seconds": 1}).limited(7.0).duration == 7.0
+    assert FftSpec.from_dict({"duration": "1min"}).limited(10.0).duration == 10.0  # the shorter of the two
+    assert FftSpec.from_dict({"duration": "5s"}).limited(10.0).duration == 5.0
+    assert FftSpec.from_dict({}, "10s").duration == 10.0
+    assert check_sinks([{"fft": {"row_seconds": "250ms", "duration": "1min"}}]) == [
+        {"fft": {"width": 16384, "row_seconds": 0.25, "duration": 60.0, "min_db": None, "max_db": None}}
+    ]
+    with pytest.raises(ValueError, match="unknown fft sink key"):
+        check_sinks([{"fft": {"heigth": 5}}])
+    with pytest.raises(ValueError, match="listed twice"):
+        check_sinks([{"fft": {}}, {"fft": {}}])
+    with pytest.raises(ValueError, match="one-key mapping"):
+        check_sinks([{"fft": {}, "wav": {}}])
     for bad in ({"width": 1000}, {"width": 32}, {"width": 2**21}, {"width": True}, {"row_seconds": 0}):
         with pytest.raises(ValueError):
             FftSpec.from_dict({**bad, "duration": 5})
@@ -137,36 +146,61 @@ def test_fft_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(ROOT)
     sc = _scenario(tmp_path, "  - fft: {width: 4096, row_seconds: 0.1, duration: 0.8s, min_db: 0, max_db: 40}")
     out = tmp_path / "out"
-    res = runner.invoke(app, ["fft", str(sc), "-o", str(out), "--workers", "1"])
+    res = runner.invoke(app, ["run", str(sc), "-o", str(out), "--workers", "1"])
     assert res.exit_code == 0, res.output
     (png,) = out.glob("*.png")
     assert png.name == "waterfall_137000000Hz_15-00-00_04-11-2026.png"
     img = Image.open(png)
     run = json.loads((out / "run.json").read_text())
-    assert run["status"] == "complete" and run["fft"]["levels"] == "given"
-    assert img.size == (4096, run["fft"]["height"]) and img.mode == "L"
-    assert run["render"]["n_samples"] == run["fft"]["height"] * run["fft"]["avg_count"] * 4096
+    (sink,) = run["sinks"]
+    fft = sink["info"]
+    assert run["status"] == "complete" and sink["kind"] == "fft" and fft["levels"] == "given"
+    assert sink["params"]["duration"] == 0.8 and run["files"][0]["name"] == png.name
+    assert img.size == (4096, fft["height"]) and img.mode == "L"
+    assert run["render"]["n_samples"] == fft["height"] * fft["avg_count"] * 4096  # the run ends with the sink
 
-    again = runner.invoke(app, ["fft", str(sc), "-o", str(out)])
+    again = runner.invoke(app, ["run", str(sc), "-o", str(out)])
     assert again.exit_code == 1 and "exists" in again.output
     before = png.read_bytes()
-    forced = runner.invoke(app, ["fft", str(sc), "-o", str(out), "--force", "--workers", "2"])
+    forced = runner.invoke(app, ["run", str(sc), "-o", str(out), "--force", "--workers", "2"])
     assert forced.exit_code == 0 and png.read_bytes() == before  # same pixels for any worker count
 
 
-def test_fft_cli_duration_is_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fft_cli_takes_the_stream_length(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a duration of its own the sink plots the run's stream: the scenario clock (1 s), or --duration."""
     monkeypatch.chdir(ROOT)
     sc = _scenario(tmp_path, "  - fft: {width: 4096}")
-    res = runner.invoke(app, ["fft", str(sc), "-o", str(tmp_path / "o")])
-    assert res.exit_code == 2 and "duration" in res.output and not (tmp_path / "o").exists()
-    ok = runner.invoke(app, ["fft", str(sc), "-o", str(tmp_path / "o"), "--duration", "2s", "--workers", "1"])
+    res = runner.invoke(app, ["run", str(sc), "-o", str(tmp_path / "o")])
+    assert res.exit_code == 2 and "shorter than one row" in res.output and not (tmp_path / "o").exists()
+    ok = runner.invoke(app, ["run", str(sc), "-o", str(tmp_path / "o"), "--duration", "2s", "--workers", "1"])
     assert ok.exit_code == 0, ok.output
     run = json.loads((tmp_path / "o" / "run.json").read_text())
-    assert run["fft"]["levels"] == "calibrated" and run["fft"]["min_db"] is not None
+    fft = run["sinks"][0]["info"]
+    assert fft["levels"] == "calibrated" and fft["min_db"] is not None and fft["rows_written"] == 1
+    short = ["run", str(sc), "-o", str(tmp_path / "s"), "--duration", "5s", "--set", "sinks[fft].duration=2.5s"]
+    ok = runner.invoke(app, [*short, "--workers", "1"])
+    assert ok.exit_code == 0, ok.output  # the sink's own, shorter duration ends the run early
+    run = json.loads((tmp_path / "s" / "run.json").read_text())
+    assert run["sinks"][0]["info"]["height"] == 2 and run["render"]["duration_s"] < 2.5
 
 
-def test_fft_cli_needs_a_sink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serving_and_file_sinks_do_not_mix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(ROOT)
-    sc = _scenario(tmp_path, "  - rtl_tcp: {port: 1234}")
-    res = runner.invoke(app, ["fft", str(sc), "-o", str(tmp_path / "o"), "--duration", "1s"])
-    assert res.exit_code == 2 and "no `fft`" in res.output
+    sc = _scenario(
+        tmp_path, "  - rtl_tcp: {port: 1234}\n  - fft: {width: 4096, row_seconds: 0.1, min_db: 0, max_db: 40}"
+    )
+    res = runner.invoke(app, ["run", str(sc), "-o", str(tmp_path / "o")])
+    assert res.exit_code == 2 and "exactly one serving sink" in res.output and "--sink rtl_tcp" in res.output
+    res = runner.invoke(app, ["run", str(sc), "--sink", "rtl_tcp", "--sink", "fft", "-o", str(tmp_path / "o")])
+    assert res.exit_code == 2 and not (tmp_path / "o").exists()
+    ok = runner.invoke(app, ["run", str(sc), "--sink", "fft", "-o", str(tmp_path / "o"), "--workers", "1"])
+    assert ok.exit_code == 0, ok.output
+    assert json.loads((tmp_path / "o" / "run.json").read_text())["sinks"][0]["info"]["height"] == 9
+    # A sink the scenario does not list runs with its defaults, next to a listed one
+    two = runner.invoke(
+        app, ["run", str(sc), "--sink", "fft", "--sink", "cu8", "-o", str(tmp_path / "t"), "--workers", "1"]
+    )
+    assert two.exit_code == 0, two.output
+    run = json.loads((tmp_path / "t" / "run.json").read_text())
+    assert [s["kind"] for s in run["sinks"]] == ["fft", "cu8"] and run["render"]["n_samples"] == FS  # the longer
+    assert sorted(p.suffix for p in (tmp_path / "t").iterdir()) == [".cu8", ".json", ".png"]

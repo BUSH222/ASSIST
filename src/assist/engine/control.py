@@ -61,8 +61,6 @@ if TYPE_CHECKING:
 CONTROL_HZ = 1000
 HOPS_PER_CHUNK = 100  # one control chunk = 100 hops = 1 s
 RATE_MARGIN = 1.25
-MU_KM3_S2 = 398600.8  # WGS72, as SGP4
-EARTH_ROTATION_KM_S = 0.6  # bound on what Earth rotation adds to a LEO satellite's speed seen from the ground
 OFFSET_SIGMAS = 6.0
 DRIFT_BOUND_S = 1800.0
 PASS_PAD_S = 0.002  # control samples this close outside a pass use that pass's carrier terms
@@ -87,16 +85,6 @@ def fade(t: np.ndarray, passes: list[tuple[float, float]], fade_s: float) -> np.
 
 class RenderError(RuntimeError):
     pass
-
-
-def max_speed_km_s(sat: object) -> float:
-    """Upper bound on a satellite's speed relative to the station: perigee speed plus Earth rotation."""
-    model = sat.model  # ty: ignore[unresolved-attribute]
-    n = float(model.no_kozai) / 60.0  # rad/s
-    e = float(model.ecco)
-    a = (MU_KM3_S2 / n**2) ** (1 / 3)
-    rp = a * (1 - e)
-    return math.sqrt(MU_KM3_S2 * (2 / rp - 1 / a)) + EARTH_ROTATION_KM_S
 
 
 def narrow_rate(bandwidth_hz: float, excursion_hz: float, preferred: int, fs: int, m: int, step: int = 100) -> int:
@@ -173,9 +161,8 @@ class EmitterRender:
         self.per_event = em.per_event or (self.fixed and em.is_event)
         excursion = abs(rest - self.f_bin_mhz) / 1000.0 + em.max_event_offset_hz
         if not self.fixed:
-            sat = em.sat.sat
             excursion += (
-                rest / 1000.0 * max_speed_km_s(sat) * 1000.0 / C_M_S
+                rest / 1000.0 * em.platform.max_speed_km_s() * 1000.0 / C_M_S
                 + OFFSET_SIGMAS * (car.pass_offset_sigma_hz or 0.0)
                 + (car.drift_hz_s or 0.0) * DRIFT_BOUND_S
             )
@@ -283,7 +270,7 @@ class EmitterRender:
             key[sel] = p.aos_key
             base[sel] = self.rest_mhz + off
             drift[sel] = d
-        g = em.sat.geo.geometry_ms(k)
+        g = em.platform.geometry_ms(k)
         amp = 10 ** (em.link_dbm(g.el_deg, g.az_deg, g.range_m, g.off_nadir_deg, self.rest_mhz) / 20)
         # Constant-frequency part: (f - f_bin)[mHz] * t[ms] / 1e6 cycles, reduced mod 1 cycle with integers.
         delta = base - self.f_bin_mhz

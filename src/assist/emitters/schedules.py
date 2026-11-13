@@ -5,8 +5,8 @@ All schedules are functions of absolute Unix time, so any window can be evaluate
 - `on_off`: on for exactly on_s out of every on_s + off_s, starting at phase_s (mod the period). The on interval is
   measured between half-amplitude points; raised-cosine ramps of ramp_ms are centred on its edges.
 - `exp_gaps`: bursts separated by min_gap_s + Exp(mean_gap_s - min_gap_s) from the end of one to the start of the
-  next. Generated per UTC hour slot from the keyed stream (source_id, emitter_id, "slot", hour_index); each slot
-  starts a fresh chain at slot start + one gap, so slots are independent (random access).
+  next. Generated per UTC hour slot from the emitter's keyed stream (source_id, emitter_id, "slot", hour_index);
+  each slot starts a fresh chain at slot start + one gap, so slots are independent (random access).
 - `poisson_events`: per hour slot, N ~ Poisson(rate for that UTC hour), starts uniform in the hour, durations from
   the configured distribution (clipped to max_s <= 1 h). Same keyed stream per slot. With `min_gap_s` (M7, one
   transmitter) an event starting less than min_gap_s after the previous kept event's end is dropped afterwards (a
@@ -30,7 +30,7 @@ import numpy as np
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from assist.rng import KeyedRng
+    from assist.rng import RngScope
 
 
 SLOT_S = 3600
@@ -173,14 +173,12 @@ class _EventSchedule(Schedule):
 
     def __init__(
         self,
-        rng: KeyedRng,
-        source_id: str,
-        emitter_id: str,
+        scope: RngScope,
         duration: DurationDist,
         maker: EventMaker | None = None,
         ramp_ms: float = 0.0,
     ) -> None:
-        self.rng, self.source_id, self.emitter_id, self.duration = rng, source_id, emitter_id, duration
+        self.scope, self.duration = scope, duration  # scope: the emitter's (source_id, emitter_id)
         self.maker = maker
         self.ramp_s = ramp_ms / 1000.0
         self._slots: OrderedDict[int, tuple[list[Event], list[float]]] = OrderedDict()
@@ -205,7 +203,7 @@ class _EventSchedule(Schedule):
     def _slot(self, h: int) -> tuple[list[Event], list[float]]:
         hit = self._slots.get(h)
         if hit is None:
-            ev = self._slot_events(self.rng.stream(self.source_id, self.emitter_id, "slot", h), h)
+            ev = self._slot_events(self.scope.stream("slot", h), h)
             hit = (ev, [e.start for e in ev])  # starts are sorted within a slot
             self._slots[h] = hit
             while len(self._slots) > SLOT_CACHE:
@@ -278,9 +276,7 @@ def event_envelope(t: np.ndarray, start: float, end: float, ramp_s: float) -> np
 class ExpGaps(_EventSchedule):
     def __init__(
         self,
-        rng: KeyedRng,
-        source_id: str,
-        emitter_id: str,
+        scope: RngScope,
         duration: DurationDist,
         mean_gap_s: float = 180.0,
         min_gap_s: float = 20.0,
@@ -289,7 +285,7 @@ class ExpGaps(_EventSchedule):
     ) -> None:
         if not 0 <= min_gap_s <= mean_gap_s:
             raise ValueError("exp_gaps needs 0 <= min_gap_s <= mean_gap_s")
-        super().__init__(rng, source_id, emitter_id, duration, maker, ramp_ms)
+        super().__init__(scope, duration, maker, ramp_ms)
         if self.upper_s > min_gap_s:
             raise ValueError("exp_gaps: event durations (max_s) must not exceed min_gap_s, or slots could overlap")
         self.mean_gap_s, self.min_gap_s = mean_gap_s, min_gap_s
@@ -312,16 +308,14 @@ class ExpGaps(_EventSchedule):
 class PoissonEvents(_EventSchedule):
     def __init__(
         self,
-        rng: KeyedRng,
-        source_id: str,
-        emitter_id: str,
+        scope: RngScope,
         duration: DurationDist,
         rate_per_hour: float | Sequence[float] = 1.0,
         maker: EventMaker | None = None,
         ramp_ms: float = 0.0,
         min_gap_s: float = 0.0,
     ) -> None:
-        super().__init__(rng, source_id, emitter_id, duration, maker, ramp_ms)
+        super().__init__(scope, duration, maker, ramp_ms)
         if self.upper_s > SLOT_S:
             raise ValueError("poisson_events: max_s must be <= 3600 s")
         self.rate_per_hour = rate_per_hour

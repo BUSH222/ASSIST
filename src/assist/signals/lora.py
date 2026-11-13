@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal, override
 import numpy as np
 from pydantic import Field, field_validator
 
-from assist.signals.base import Signal, SignalParams
+from assist.signals.base import Signal, SignalParams, register_signal
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -103,8 +103,8 @@ def _layout(preamble: int, n_pl: int) -> tuple[np.ndarray, np.ndarray, int]:
     return np.array(starts), np.array(lens), first
 
 
+@register_signal("lora")
 class LoRa(Signal):
-    kind = "lora"
     Params = LoraParams
     mode = "event"
 

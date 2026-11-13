@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Literal, override
 import numpy as np
 from pydantic import Field, field_validator
 
-from assist.signals.base import Signal, SignalParams, float_range
+from assist.signals.base import Signal, SignalParams, float_range, register_signal
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -55,8 +55,8 @@ def gauss_taps(width_hz: float, rate: int) -> np.ndarray:
     return h
 
 
+@register_signal("noise_band")
 class NoiseBand(Signal):
-    kind = "noise_band"
     Params = NoiseBandParams
 
     def __init__(self, params: SignalParams, keys: Keys, dsp: ModuleType) -> None:
@@ -126,8 +126,8 @@ def beta_of(amplitude_db: float) -> float:
     return float((10 ** (2 * amplitude_db / 10) - 1) / 2)
 
 
+@register_signal("noise_comb")
 class NoiseComb(Signal):
-    kind = "noise_comb"
     Params = NoiseCombParams
     mode = "wideband"
 
@@ -165,7 +165,7 @@ class NoiseComb(Signal):
         p = self.cp
         dur = ev.end - ev.start
         nk = math.ceil(dur / p.knot_s) + 2
-        g = self.keys.rng.stream(self.keys.source_id, self.keys.emitter_id, "wander", round(ev.start * US))
+        g = self.keys.stream("wander", round(ev.start * US))
         v = g.normal(0.0, p.wander_hz_s, nk)
         k = p.knot_s
         cum = np.concatenate([[0.0], np.cumsum(k * (v[:-1] + v[1:]) / 2)])

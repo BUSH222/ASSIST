@@ -359,7 +359,7 @@ def test_event_envelope_ramps() -> None:
 
 
 def test_poisson_dead_time_and_slot_cache() -> None:
-    sch = PoissonEvents(KeyedRng(4), "s", "e", DurationDist("fixed", s=0.02), 7200, min_gap_s=0.05)
+    sch = PoissonEvents(KeyedRng(4).scope("s", "e"), DurationDist("fixed", s=0.02), 7200, min_gap_s=0.05)
     ev = sch.events(T0, T0 + 5 * 3600)
     starts = np.array([e.start for e in ev])
     ends = np.array([e.end for e in ev])
@@ -367,7 +367,7 @@ def test_poisson_dead_time_and_slot_cache() -> None:
     kept = len(ev) / (5 * 3600)
     assert abs(kept - 2 / (1 + 2 * 0.07)) < 0.05  # dead time: rate / (1 + rate (duration + gap))
     assert len(sch._slots) <= SLOT_CACHE
-    again = PoissonEvents(KeyedRng(4), "s", "e", DurationDist("fixed", s=0.02), 7200, min_gap_s=0.05)
+    again = PoissonEvents(KeyedRng(4).scope("s", "e"), DurationDist("fixed", s=0.02), 7200, min_gap_s=0.05)
     assert again.events(T0 + 4 * 3600, T0 + 4 * 3600 + 60) == sch.events(T0 + 4 * 3600, T0 + 4 * 3600 + 60)
 
 

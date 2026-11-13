@@ -15,10 +15,12 @@ import datetime as dt
 import math
 import struct
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, override
 
 import numpy as np
+from pydantic import Field
 
+from assist.sinks.base import Sink, SinkContext, SinkParams, register_sink
 from assist.timebase import format_iso, parse_tz
 
 if TYPE_CHECKING:
@@ -142,3 +144,58 @@ class FileSink:
         total = sum(f.n_samples for f in self.files)
         if self.written != total:
             raise ValueError(f"wrote {self.written} samples, planned {total}")
+
+
+class _FileStreamSink(Sink):
+    """A push sink writing the stream into planned files of one format."""
+
+    fmt: str
+
+    def __init__(self, params: SinkParams, ctx: SinkContext) -> None:
+        super().__init__(params, ctx)
+        assert ctx.n is not None
+        self._files = plan_files(ctx.out, self.fmt, ctx.fc_hz, ctx.fs, ctx.tz, ctx.n0, ctx.n)
+        self._sink = FileSink(self._files, self.fmt, ctx.fs)
+
+    @override
+    def files(self) -> list[OutFile]:
+        return self._files
+
+    @override
+    def write(self, u8: np.ndarray) -> None:
+        self._sink.write(u8)
+
+    @override
+    def close(self) -> None:
+        self._sink.close()
+
+    @override
+    def abort(self) -> None:
+        self._sink.close_quietly()
+
+    @override
+    def info(self) -> dict[str, Any]:
+        return {"format": self.fmt, "samples_written": self._sink.written}
+
+
+class WavParams(SinkParams):
+    rf64: bool = Field(False, description="One RF64 file of any length instead of 10 min WAV splits.")
+
+
+@register_sink("wav")
+class WavSink(_FileStreamSink):
+    """WAV files like the station's SDR++ recordings (split every 10 min), or one RF64 file (`rf64: true`)."""
+
+    Params = WavParams
+
+    def __init__(self, params: SinkParams, ctx: SinkContext) -> None:
+        assert isinstance(params, WavParams)
+        self.fmt = "rf64" if params.rf64 else "wav"
+        super().__init__(params, ctx)
+
+
+@register_sink("cu8")
+class Cu8Sink(_FileStreamSink):
+    """One headerless file of interleaved uint8 I, Q, as rtl_sdr writes."""
+
+    fmt = "cu8"

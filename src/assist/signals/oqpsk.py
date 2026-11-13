@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Literal, override
 import numpy as np
 from pydantic import Field
 
+from assist.signals.base import register_signal
 from assist.signals.pulse import ShapedParams, ShapedSignal, unpack
 
 if TYPE_CHECKING:
@@ -40,8 +41,8 @@ class OqpskParams(ShapedParams):
     framing: Literal["meteor_cadu", "random"] = "meteor_cadu"
 
 
+@register_signal("oqpsk")
 class OQPSK(ShapedSignal):
-    kind = "oqpsk"
     Params = OqpskParams
     q_delay = True
 

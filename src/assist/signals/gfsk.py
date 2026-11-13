@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, override
 import numpy as np
 from pydantic import Field, model_validator
 
-from assist.signals.base import Signal, SignalParams, float_range
+from assist.signals.base import Signal, SignalParams, float_range, register_signal
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -75,8 +75,8 @@ def _ramp(n: int) -> np.ndarray:
     return 0.5 * (1 - np.cos(np.pi * (np.arange(n) + 0.5) / n))
 
 
+@register_signal("gfsk")
 class GFSK(Signal):
-    kind = "gfsk"
     Params = GfskParams
     mode = "event"
 

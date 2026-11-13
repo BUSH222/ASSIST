@@ -76,7 +76,7 @@ class Renderer:
         base = base or Path.cwd()
         prof = base / sc.profile if sc.profile else None
         self.noise_spec = noise_spec(prof, load_band(sc.band), fe.fc_hz, fe.fs_hz, fe.noise_sigma_counts, sc.profile)
-        self.front = Frontend(self.noise_spec, scene.t_sys_k, self.fs, self.hop, self.m, scene.rng, self.dsp)
+        self.front = Frontend(self.noise_spec, scene.t_sys_k, self.fs, self.hop, self.m, scene.rng.scope(), self.dsp)
         self.noise_on = noise
         self.prefetch = prefetch
         self.emitters: list[EmitterRender] = []
