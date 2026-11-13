@@ -1,4 +1,4 @@
-"""`d8psk` (plan §5): VDL Mode 2 bursts, 10.5 ksym/s differential 8-PSK, an event signal (M7).
+"""`d8psk`: VDL Mode 2 bursts, 10.5 ksym/s differential 8-PSK, an event signal.
 
 A burst is a whole number of symbols on the absolute symbol grid (symbol k at Unix time k / rs; the first symbol is
 the first grid point at or after the event start):

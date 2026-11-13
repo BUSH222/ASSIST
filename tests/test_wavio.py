@@ -1,4 +1,4 @@
-"""P1: cu8 WAV reader (RIFF, RF64, wrapped size fields, auxi) and SDR++ start times."""
+"""cu8 WAV reader (RIFF, RF64, wrapped size fields, auxi) and SDR++ start times."""
 
 import datetime as dt
 import struct

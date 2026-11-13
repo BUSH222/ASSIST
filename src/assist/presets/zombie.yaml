@@ -1,4 +1,4 @@
-# Zombie satellite (plan §6.5): an unmodulated carrier keyed 40 s on / 180 s off, tumbling AM, and an oscillator
+# Zombie satellite: an unmodulated carrier keyed 40 s on / 180 s off, tumbling AM, and an oscillator
 # with a per-pass offset and a linear in-pass drift. `freq_hz` is required (a number or a random expression).
 # AM and level defaults are the plan's Appendix A example values.
 platform: satellite

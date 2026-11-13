@@ -1,11 +1,11 @@
-"""The render engine (plan §4): a scene in, the station's uint8 IQ stream out.
+"""The render engine: a scene in, the station's uint8 IQ stream out.
 
-Everything is addressed by absolute sample index n (sample n is at Unix time n / fs, plan §3.1):
+Everything is addressed by absolute sample index n (sample n is at Unix time n / fs):
 - hop h holds samples [hN, hN + N) (N = fs / 100, 10 ms);
 - OLA block b covers [bN, bN + 2N), and hop h's output is blocks h-1 and h overlap-added (`synth`);
 - the engine works in absolute 1 s chunks: chunk c is hops 100c .. 100c + 99, i.e. samples [c fs, (c + 1) fs). Per
   emitter, control samples and narrow samples are computed per chunk; noise is drawn per hop.
-So rendering any window gives exactly the same bytes for the overlapping samples (T-WIN), whatever the start.
+So rendering any window gives exactly the same bytes for the overlapping samples, whatever the start.
 
 Per chunk there is one kernel call each for the signal blocks (`dsp.synth`), the shaped noise (`dsp.noise`) and the
 ADC (`dsp.adc`), from `assist.backend` (C++, or the numpy twins with ASSIST_PURE=1). They write into buffers the
@@ -13,9 +13,9 @@ Renderer keeps (fresh 19 MB arrays every chunk cost page faults, which contend b
 per-chunk results (`signal`, `chunk_iq`, `chunk_u8`) are views valid until the next chunk replaces them.
 
 Signals pass the receiver response (the profile's noise shape) in the frequency domain; noise is shaped by the same
-FIR in time. Wideband local emitters (M7: the USB humps) are added in the time domain before the ADC, without the
-receiver response. Image, IM3, DC, edge aliasing and the diurnal noise level are M8; the crystal error (ppm) must
-be 0 until then.
+FIR in time. Wideband local emitters (the USB humps) are added in the time domain before the ADC, without the
+receiver response. Image, IM3, DC, edge aliasing and the diurnal noise level are not modelled, and the crystal error
+(ppm) must be 0.
 """
 
 import math
@@ -64,7 +64,7 @@ class Renderer:
         sc = scene.scenario
         fe = sc.frontend
         if fe.ppm != 0:
-            raise ValueError("frontend.ppm must be 0 until M8")
+            raise ValueError("frontend.ppm must be 0 (the crystal error is not modelled)")
         if dsp is None:
             from assist.backend import dsp
         self.dsp = dsp

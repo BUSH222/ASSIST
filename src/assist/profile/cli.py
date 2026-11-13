@@ -1,4 +1,4 @@
-"""`assist profile build | labels | report | terrestrial` (plan §8, §9)."""
+"""`assist profile build | labels | report | terrestrial`."""
 
 from pathlib import Path
 from typing import Annotated
@@ -29,7 +29,7 @@ def build(
     saw: Annotated[Path | None, typer.Option(help="SAW S21 table (default: saw.csv).")] = None,
     work: Annotated[Path, typer.Option(help="Intermediates and event list.")] = Path("out/profile"),
 ) -> None:
-    """Run P1-P12 and write the profile."""
+    """Run every survey step and write the profile."""
     from assist.profile.build import build as run
 
     run(
@@ -52,7 +52,7 @@ def labels(
     samples: SamplesOpt = Path("samples"),
     n: Annotated[int, typer.Option(help="Events to sample (stratified by auto label).")] = 200,
 ) -> None:
-    """Write a label sheet (events.csv + crop images) for optional manual labelling (plan §9.1)."""
+    """Write a label sheet (events.csv + crop images) for optional manual labelling."""
     import json
 
     from assist.profile import labels as lb
@@ -108,7 +108,7 @@ def terrestrial(
     ] = False,
     work: Annotated[Path, typer.Option(help="Cache directory.")] = Path("out/profile/cache"),
 ) -> None:
-    """P14 (M7): measure VDL bursts in the recording and AM / 138 MHz levels in the event list (terrestrial.json),
+    """Measure VDL bursts in the recording and AM / 138 MHz levels in the event list (terrestrial.json),
     then write the band's terrestrial scenario from the profile."""
     import json
 

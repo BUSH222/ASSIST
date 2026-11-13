@@ -1,7 +1,7 @@
-"""Signal kinds (plan §3.4, §5).
+"""Signal kinds.
 
 A kind is a `Signal` subclass registered under a name with `@register_signal("name")`; the core kinds live in this
-package, external ones in modules a scenario lists under `plugins:` (PLAN.md). Parameters are a pydantic model per
+package, external ones in modules a scenario lists under `plugins:`. Parameters are a pydantic model per
 kind (unknown keys are errors); validation fills in the defaults, so a resolved scenario lists every parameter.
 
 Three modes:
@@ -15,7 +15,7 @@ Three modes:
 
 Random content (payload bits, frames, burst symbols) comes from `Keys`, the emitter's `RngScope`: 64-bit keys per
 (source, emitter, purpose) for the counter-based `random_bytes` kernel, whose counter is an absolute index (frame,
-symbol chunk, segment, event start), so any window is rendered on its own (plan §3.2); `Keys.stream` gives a numpy
+symbol chunk, segment, event start), so any window is rendered on its own; `Keys.stream` gives a numpy
 Generator under the same prefix for per-event draws. A signal never holds the seed or the `KeyedRng` itself.
 """
 
@@ -105,7 +105,7 @@ class Keys(RngScope):
 
 
 class Signal(ABC):
-    """How an emitter is modulated. Output: complex64 with unit mean power while on (plan §3.4)."""
+    """How an emitter is modulated. Output: complex64 with unit mean power while on."""
 
     kind: ClassVar[str]
     Params: ClassVar[type[SignalParams]]
@@ -117,7 +117,7 @@ class Signal(ABC):
 
     @abstractmethod
     def bandwidth_hz(self) -> float:
-        """Occupied bandwidth (Hz) of the baseband signal, used by the narrow-rate rule (plan §4.2)."""
+        """Occupied bandwidth (Hz) of the baseband signal, used by the narrow-rate rule."""
 
     @abstractmethod
     def preferred_rate(self) -> int:
@@ -130,7 +130,7 @@ class Signal(ABC):
     def render(self, n0: int, n: int, rate: int) -> np.ndarray:
         """Continuous signals: n samples (complex64) at `rate`, starting at absolute narrow index n0.
 
-        Index n is at Unix time n / rate, so content is addressed by absolute time (plan §3.1).
+        Index n is at Unix time n / rate, so content is addressed by absolute time.
         """
         raise NotImplementedError(f"{self.kind} is an event signal")
 

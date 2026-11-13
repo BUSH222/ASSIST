@@ -5,7 +5,7 @@
   1405.0
  ],
  "recording_window_mid_utc_h": 16.9069,
- "method": "P14 (M7): VDL bursts in absolute ADC counts vs ASSIST's noise; AM/138 from the days' event list",
+ "method": "VDL bursts in absolute ADC counts vs ASSIST's noise; AM/138 from the days' event list",
  "vdl": {
   "136.925": {
    "modulation": "gfsk",

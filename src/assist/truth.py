@@ -1,4 +1,4 @@
-"""`assist truth` (plan §8): what the scene contains, computed on demand from the resolved scenario.
+"""`assist truth`: what the scene contains, computed on demand from the resolved scenario.
 
 Continuous emitters give one row per step while the platform is above the horizon; event emitters give an event
 list. Values are printed with fixed precision so the text is the same on every machine: frequencies to 1 mHz (from

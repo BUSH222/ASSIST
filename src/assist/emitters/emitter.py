@@ -1,15 +1,15 @@
-"""Emitter (plan §3.4): signal + carrier + schedule + level + pattern on a platform, and its truth.
+"""Emitter: signal + carrier + schedule + level + pattern on a platform, and its truth.
 
 Truth values follow the plan's definitions:
-- f_rest = f_nominal + offset_hz; f_tx adds the per-pass offset and drift (§6.3). An event emitter with several
+- f_rest = f_nominal + offset_hz; f_tx adds the per-pass offset and drift. An event emitter with several
   frequencies (LoRa channels) has one f_rest per frequency; each event's parameters say which (`channel`).
-- doppler = -f_tx * range_rate / c (first order, geometry at reception time, §4.1); f_rx = f_tx + doppler.
-- rx_dbm from the link budget (§6.2) with the AM gain at that instant; cn0 = rx_dbm - 30 - 10 log10(k T_sys).
+- doppler = -f_tx * range_rate / c (first order, geometry at reception time); f_rx = f_tx + doppler.
+- rx_dbm from the link budget with the AM gain at that instant; cn0 = rx_dbm - 30 - 10 log10(k T_sys).
 - active_fraction: share of [t, t + step) during which the schedule is on (half-amplitude edges).
 Frequencies are carried in integer mHz (see carrier.py), so the printed truth is exact to 1 mHz.
 
 Emitters on a fixed platform (ground, local) have no geometry: a fixed received level (rx_dbm), no Doppler, always
-visible; their geometry columns are NaN. Events may carry per-event draws (M7): `offset_hz` (added to the frequency,
+visible; their geometry columns are NaN. Events may carry per-event draws: `offset_hz` (added to the frequency,
 integer mHz) and `level_db` (added to the level).
 """
 
@@ -110,7 +110,7 @@ class Emitter:
     def link_dbm(
         self, el: np.ndarray, az: np.ndarray, rng_m: np.ndarray, off_nadir: np.ndarray, f_mhz: int | None = None
     ) -> np.ndarray:
-        """Received level (dBm) from the link budget alone: no AM, no schedule (plan §6.2); at f_mhz if given.
+        """Received level (dBm) from the link budget alone: no AM, no schedule; at f_mhz if given.
         Platforms with a received level (ground, local, external ones): that level, whatever the geometry."""
         if self.platform.level_mode == "received":
             return np.full(np.shape(el), np.nan if self.rx_dbm is None else self.rx_dbm)

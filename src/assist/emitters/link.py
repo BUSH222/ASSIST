@@ -1,4 +1,4 @@
-"""Link budget (plan §6.2) and system noise temperature (§4.3).
+"""Link budget and system noise temperature.
 
 P_rx[dBm] = P_tx[dBW] + 30 + G_tx(off-nadir) - FSPL(R, f) + G_rx(90 - el) - L_horizon(az, el) - L_extra
 C/N0[dB-Hz] = P_rx[dBm] - 30 - 10 log10(k T_sys)
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 C_M_S = 299_792_458.0
 K_BOLTZ = 1.380649e-23
-QFH_COEFFS_DB = (3.369124522, 1.975440866e-2, -7.573492347e-4, -3.624644995e-6)  # plan §6.2, dBi vs degrees
+QFH_COEFFS_DB = (3.369124522, 1.975440866e-2, -7.573492347e-4, -3.624644995e-6)  # dBi vs degrees
 
 
 def poly_gain_db(x_deg: np.ndarray | float, coeffs_db: Sequence[float], max_deg: float = 90.0) -> np.ndarray:
@@ -30,7 +30,7 @@ def poly_gain_db(x_deg: np.ndarray | float, coeffs_db: Sequence[float], max_deg:
 
 
 def qfh_gain_db(x_deg: np.ndarray | float) -> np.ndarray:
-    """QFH gain (dBi) vs off-boresight angle; clamped to the 90 deg value outside 0..90 (plan §6.2)."""
+    """QFH gain (dBi) vs off-boresight angle; clamped to the 90 deg value outside 0..90."""
     x = np.asarray(x_deg, dtype=np.float64)
     c0, c1, c2, c3 = QFH_COEFFS_DB
     g = c0 + c1 * x + c2 * x**2 + c3 * x**3
@@ -74,7 +74,7 @@ def fspl_db(range_m: np.ndarray | float, f_hz: float | np.ndarray) -> np.ndarray
 def t_sys_k(
     t_ant_k: float, saw_loss_db: float, lna_nf_db: float = 1.0, lna_gain_db: float = 20.0, tuner_nf_db: float = 3.5
 ) -> float:
-    """System temperature referred to the antenna (plan §4.3)."""
+    """System temperature referred to the antenna."""
     l_saw = 10 ** (saw_loss_db / 10)
     t_lna = 290 * (10 ** (lna_nf_db / 10) - 1)
     t_tun = 290 * (10 ** (tuner_nf_db / 10) - 1)
@@ -87,7 +87,7 @@ def kt_dbw_hz(t_sys: float) -> float:
 
 
 class HorizonModel:
-    """Horizon loss L_horizon(az, el) in dB. A perfect horizon (zero) until M10 builds the map (plan §6.2)."""
+    """Horizon loss L_horizon(az, el) in dB. A perfect horizon (zero): there is no horizon map."""
 
     def loss_db(self, az_deg: np.ndarray, el_deg: np.ndarray) -> np.ndarray:
         return np.zeros(np.broadcast_shapes(np.shape(az_deg), np.shape(el_deg)))
@@ -106,7 +106,8 @@ def p_rx_dbm(
 
 
 def link_const_from_snr_c(c_db: float, band_hz: float, band_fraction: float = 1.0) -> float:
-    """Link constant from an in-band SNR constant C (SNR = C + path gain), as fitted in M1 P10.
+    """Link constant from an in-band SNR constant C (SNR = C + path gain), as fitted by the METEOR calibration
+    (`profile/meteor_cal.py`).
 
     SNR = band_fraction * P_rx / (k T_sys B), so C/N0 = SNR * B / band_fraction.
     """
@@ -126,6 +127,6 @@ def p_tx_for_cn0_zenith(
     t_sys: float,
     l_extra_db: float = 0.0,
 ) -> float:
-    """P_tx (dBW) that gives cn0_dbhz for an overhead pass at height_m above the station (plan §6.2)."""
+    """P_tx (dBW) that gives cn0_dbhz for an overhead pass at height_m above the station."""
     gain = float(tx.gain_db(0.0)) + float(rx.gain_db(0.0)) - float(fspl_db(height_m, f_hz)) - l_extra_db
     return cn0_dbhz - gain + kt_dbw_hz(t_sys)

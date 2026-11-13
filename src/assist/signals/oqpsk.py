@@ -1,4 +1,4 @@
-"""`oqpsk` (plan §5): METEOR LRPT, 72 ksym/s OQPSK with RRC alpha 0.6.
+"""`oqpsk`: METEOR LRPT, 72 ksym/s OQPSK with RRC alpha 0.6.
 
 I and Q carry +-1/sqrt(2) symbols; Q is delayed by half a symbol. Framing:
 - `meteor_cadu`: CADUs of 1024 bytes: the ASM 0x1ACFFC1D, then 1020 random bytes through the CCSDS randomiser. The

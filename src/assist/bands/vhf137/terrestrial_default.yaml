@@ -1,4 +1,4 @@
-# Terrestrial environment of the vhf137 station (plan §6.5, M7): VDL ground stations and aircraft bursts (136.925 MHz:
+# Terrestrial environment of the vhf137 station: VDL ground stations and aircraft bursts (136.925 MHz:
 # VDL Mode 4 GFSK; 136.975 MHz: VDL Mode 2 D8PSK), airband AM voice, the 138.1104 MHz carrier, USB noise humps and
 # birdies. Include it in a scenario:
 #   include: [bands/vhf137/terrestrial_default.yaml]

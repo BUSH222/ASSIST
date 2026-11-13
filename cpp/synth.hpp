@@ -1,4 +1,4 @@
-// Wideband synthesis by overlap-add in the frequency domain (plan §4.2). numpy twin: src/assist/dsp_ref/synth.py
+// Wideband synthesis by overlap-add in the frequency domain. numpy twin: src/assist/dsp_ref/synth.py
 #pragma once
 
 #include <complex>

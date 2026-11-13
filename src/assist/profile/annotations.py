@@ -1,4 +1,4 @@
-"""Hand-written time ranges (plan §9): samples/annotations.yaml.
+"""Hand-written time ranges: samples/annotations.yaml.
 
 Each entry: `{file, from_s, to_s, label, exclude_from: [...]}`. Times are seconds from the file's start (WAV: sample
 0; .raw: the time in its name). `exclude_from` names the analyses that must skip the range: `noise`, `occupancy`,

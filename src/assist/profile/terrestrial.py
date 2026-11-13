@@ -1,4 +1,4 @@
-"""P14 (M7): terrestrial calibration, and the derivation of `bands/vhf137/terrestrial_default.yaml`.
+"""Terrestrial calibration, and the derivation of `bands/vhf137/terrestrial_default.yaml`.
 
 **Measure** (`assist profile terrestrial`, needs the recording and `out/profile/events.csv`; writes
 `terrestrial.json` into the profile):
@@ -9,7 +9,7 @@
   the same C/N0 ASSIST uses (`cn0_dbhz` of a ground emitter), and the same bursts clip the same way. Detections
   shorter than 10 ms are fragments (and impulses), not bursts.
 - The modulation of a channel comes from the mean spectrum of its strongest cluster: VDL Mode 2 D8PSK is ~11 kHz
-  wide at -10 dB, VDL Mode 4 GFSK (constant envelope, +-2.4 kHz deviation) only ~4 kHz (M7: 136.925 MHz is GFSK).
+  wide at -10 dB, VDL Mode 4 GFSK (constant envelope, +-2.4 kHz deviation) only ~4 kHz (136.925 MHz is GFSK).
 - Tight level clusters (>= 10 % of the bursts within +-1 dB, twice as dense as the 1-4 dB flanks) are fixed
   transmitters (ground stations); the rest are aircraft (spread levels). A cluster
   whose bursts put many samples on the ADC rails is clipped: its true level comes from the rail fraction (the
@@ -399,7 +399,7 @@ def measure(
         "version": 1,
         "recording_window_s": [t0_s, t1_s],
         "recording_window_mid_utc_h": round(mid_h, 4),
-        "method": "P14 (M7): VDL bursts in absolute ADC counts vs ASSIST's noise; AM/138 from the days' event list",
+        "method": "VDL bursts in absolute ADC counts vs ASSIST's noise; AM/138 from the days' event list",
         "vdl": vdl,
         **events_stats(events_csv),
     }
@@ -607,7 +607,7 @@ def derive(profile_dir: Path) -> dict[str, Any]:
 
 
 HEADER = """\
-# Terrestrial environment of the vhf137 station (plan §6.5, M7): VDL ground stations and aircraft bursts (136.925 MHz:
+# Terrestrial environment of the vhf137 station: VDL ground stations and aircraft bursts (136.925 MHz:
 # VDL Mode 4 GFSK; 136.975 MHz: VDL Mode 2 D8PSK), airband AM voice, the 138.1104 MHz carrier, USB noise humps and
 # birdies. Include it in a scenario:
 #   include: [bands/vhf137/terrestrial_default.yaml]

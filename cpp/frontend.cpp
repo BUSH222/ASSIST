@@ -1,4 +1,4 @@
-// Receiver front end kernels (plan §4.3, §4.4). numpy twin: src/assist/dsp_ref/frontend.py
+// Receiver front end kernels. numpy twin: src/assist/dsp_ref/frontend.py
 #include "frontend.hpp"
 
 #include <algorithm>

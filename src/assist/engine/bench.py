@@ -1,4 +1,4 @@
-"""`assist bench` (plan §4.5, §8): render speed versus real time, on one worker and on N, without writing files.
+"""`assist bench`: render speed versus real time, on one worker and on N, without writing files.
 
 - **One worker** (one core): this process renders the window after a 1 s warm-up (the chunk before the window:
   geometry blocks, passes, FFT plans), timing each stage: `control` (Python: per-emitter control samples and narrow

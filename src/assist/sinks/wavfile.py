@@ -1,4 +1,4 @@
-"""cu8 file sinks (plan §7.2): WAV like the station's SDR++ recordings, single-file RF64, or headerless .cu8.
+"""cu8 file sinks: WAV like the station's SDR++ recordings, single-file RF64, or headerless .cu8.
 
 - **WAV:** PCM, 2 channels, 8-bit unsigned, fs. The header is the canonical 44 bytes (RIFF, fmt, data, nothing
   else): SDR++'s file source reads a fixed header layout. Files are split every 10 min (2.88 GB at 2.4 MS/s, under

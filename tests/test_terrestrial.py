@@ -1,11 +1,11 @@
-"""M7, the terrestrial environment (plan §5, §6.5, §10.1): ground/local platforms, per-event draws, d8psk, am,
+"""The terrestrial environment: ground/local platforms, per-event draws, d8psk, am,
 noise_band, noise_comb, and the band's terrestrial scenario. No samples needed (flat noise shape: no profile, except
 the band-file checks, which use the committed profile).
 
 - Signals: VDL bursts (symbol grid, sync sequence, Gray-coded steps, ramps, unit power, bandwidth), AM (carrier,
   voice band, PTT ramps, pauses), noise_band (power, width), noise_comb (comb spacing, level, ripple).
 - Engine: ground levels resolve to rx_dbm; each event's offset and level in truth and in the rendered signal; C/N0
-  from the uint8 stream; two AM transmitters on one channel beat; T-WIN, worker processes, T-KEY.
+  from the uint8 stream; two AM transmitters on one channel beat; window independence, worker processes, keyed draws.
 - Schedules: event ramps, the dead time (min_gap_s), the bounded slot cache.
 - Truth: ground rows without geometry, every burst with its frequency and strength, the platform filter.
 - bands/vhf137/terrestrial_default.yaml is what the profile derives, and it renders.
@@ -282,7 +282,7 @@ def test_d8psk_burst_lengths() -> None:
 
 
 def test_gfsk_burst() -> None:
-    """VDL Mode 4 style: constant envelope, +-2.4 kHz deviation, centre-peaked (M7: 136.925 MHz is ~2.7 kHz wide at
+    """VDL Mode 4 style: constant envelope, +-2.4 kHz deviation, centre-peaked (136.925 MHz is ~2.7 kHz wide at
     -10 dB in the recording, VDL2 D8PSK ~11 kHz)."""
     sig = make_signal("gfsk", {}, _keys(), dsp)
     assert isinstance(sig, GFSK)
@@ -303,7 +303,8 @@ def test_gfsk_burst() -> None:
     assert 4500 < ter.mean_spectrum_width_db10(body, rate) < 6000  # random data
     np.testing.assert_array_equal(sig.render_events([ev], n0 + 4321, 999, rate), x[4321:5320].astype(np.complex64))
     assert sig.preferred_rate() == 76_800 and sig.rate_step() == 19_200
-    # frequent transitions (NRZI-like) narrow it: the fit P14 makes to the recording's 136.925 MHz bursts
+    # frequent transitions (NRZI-like) narrow it: the fit `assist profile terrestrial` makes to the recording's 136.925
+    # MHz bursts
     narrow = make_signal("gfsk", {"transition_p": 0.665}, _keys(), dsp)
     y = narrow.render_events([ev], n0, 20_000 * sps + 100, rate).astype(np.complex128)[50 + 10 * sps : -50 - 10 * sps]
     assert abs(ter.mean_spectrum_width_db10(y, rate) - 2734) < 400
@@ -513,7 +514,7 @@ def test_band_file_is_derived_from_the_profile() -> None:
 
 
 def test_band_vdl_modulations() -> None:
-    """M7: 136.925 MHz carries VDL Mode 4 GFSK (constant envelope, ~2.7 kHz wide), 136.975 MHz VDL Mode 2 D8PSK."""
+    """136.925 MHz carries VDL Mode 4 GFSK (constant envelope, ~2.7 kHz wide), 136.975 MHz VDL Mode 2 D8PSK."""
     doc = yaml.safe_load((band_dir("vhf137") / "terrestrial_default.yaml").read_text())
     kinds = {(s["freq_hz"], s["signal"]["kind"]) for s in doc["sources"] if s["id"].startswith("vdl")}
     assert kinds == {(136.925e6, "gfsk"), (136.975e6, "d8psk")}

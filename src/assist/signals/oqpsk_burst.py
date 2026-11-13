@@ -1,4 +1,4 @@
-"""`oqpsk_burst` (plan §5, §6.4 `periodic_bursts`): the ORBCOMM gateway downlink, OQPSK bursts at 28.8 ksym/s.
+"""`oqpsk_burst`: the ORBCOMM gateway downlink, OQPSK bursts at 28.8 ksym/s.
 
 Segment s starts at s * period_s (absolute Unix time) and holds `blocks` blocks (4 or 5, drawn per segment) of
 block_ms each, gap_ms apart: block b of segment s covers [s period + b (block + gap), ... + block). Each block

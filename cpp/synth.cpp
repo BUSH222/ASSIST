@@ -1,4 +1,4 @@
-// Wideband synthesis (plan §4.2). numpy twin: src/assist/dsp_ref/synth.py
+// Wideband synthesis. numpy twin: src/assist/dsp_ref/synth.py
 #include "synth.hpp"
 
 #include <algorithm>

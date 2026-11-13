@@ -1,4 +1,4 @@
-"""cu8 WAV reader (plan §9, P1).
+"""cu8 WAV reader.
 
 Reads RIFF and RF64 files holding interleaved unsigned 8-bit I/Q, memory-mapped. RIFF size fields of files over
 4 GiB are wrong (SDR++ lets them wrap mod 2^32); in that case the data chunk runs to the end of the file. The start

@@ -1,4 +1,4 @@
-"""Registries of the extension points (PLAN.md): named classes, core and external.
+"""Registries of the extension points: named classes, core and external.
 
 A registry maps names to classes. Core classes (defined inside the `assist` package) are always available; their
 modules are imported the first time the registry is asked for anything. External classes are *declared* when their

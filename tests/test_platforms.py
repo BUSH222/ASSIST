@@ -1,4 +1,4 @@
-"""Platforms by capability (PLAN.md R2): the registry, capability rules, and the external `tethered` platform."""
+"""Platforms by capability: the registry, capability rules, and the external `tethered` platform."""
 
 import itertools
 import json

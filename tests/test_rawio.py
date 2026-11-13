@@ -1,4 +1,4 @@
-"""P4/P5: waterfall .raw loader and row timing."""
+"""Waterfall .raw loader and row timing."""
 
 from typing import TYPE_CHECKING
 
@@ -20,7 +20,7 @@ def test_open_raw_and_row_timing(tmp_path: Path) -> None:
     raw = open_raw(p)
     assert raw.n_rows == 3
     assert raw.t_file == 1790507202
-    # P5: t_row(i) = t_file + 11 993 088/fs + (i + 0.5) * 2 392 064/fs
+    # t_row(i) = t_file + 11 993 088/fs + (i + 0.5) * 2 392 064/fs
     assert raw.row_time(0) == pytest.approx(1790507202 + 11_993_088 / 2.4e6 + 0.5 * 2_392_064 / 2.4e6, abs=1e-9)
     assert raw.row_time(2) - raw.row_time(1) == pytest.approx(0.99669, abs=1e-5)
     assert raw.row_at(float(raw.row_time(1))) == 1

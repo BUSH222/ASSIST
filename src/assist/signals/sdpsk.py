@@ -1,4 +1,4 @@
-"""`sdpsk` (plan §5): ORBCOMM subscriber downlink, symmetric differential PSK at 4800 sym/s, RRC alpha 0.4.
+"""`sdpsk`: ORBCOMM subscriber downlink, symmetric differential PSK at 4800 sym/s, RRC alpha 0.4.
 
 The absolute phase state of symbol k is p_k = (k mod 2) + 2 bit(k), phase pi/2 p_k: every step is +-90 deg (the
 step's sign carries the data), and any symbol can be computed from its index alone. Bits are random, 4096 per

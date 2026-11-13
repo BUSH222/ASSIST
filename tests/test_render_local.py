@@ -1,12 +1,12 @@
 """Full-pass check of a real render (local only, skipped without it, as in CI).
 
-The render is the SDR++ check of M3: `uv run assist render scenarios/zombie_single.yaml -o out/m3` (18 min, two
+The render is `uv run assist run scenarios/zombie_single.yaml --sink wav` (into out/zombie_single; 18 min, two
 WAV files). Its run.json holds the resolved scenario, so the truth is rebuilt from it, and the WAVs are read with
-the M1 reader. Across the whole pass, in 1 s windows inside the zombie's on intervals where truth C/N0 >= 30 dB-Hz
-(AM and noise included):
-- T-DOP: tone frequency vs truth f_rx, <= 0.1 Hz RMS (mostly the estimator's own noise: 0.5 s windows give ~80 mHz,
+the profile tool's reader. Across the whole pass, in 1 s windows inside the zombie's on intervals where truth C/N0 >=
+30 dB-Hz (AM and noise included):
+- Doppler: tone frequency vs truth f_rx, <= 0.1 Hz RMS (mostly the estimator's own noise: 0.5 s windows give ~80 mHz,
   2 s windows ~11 mHz; the noiseless CI check shows ~1 mHz);
-- T-LVL: C/N0 vs truth, mean within 0.1 dB, RMS within the windows' own scatter (<= 0.4 dB);
+- level: C/N0 vs truth, mean within 0.1 dB, RMS within the windows' own scatter (<= 0.4 dB);
 - off intervals: no carrier.
 """
 
@@ -23,7 +23,7 @@ from assist.engine.scene import Scene
 from assist.profile.wavio import Recording
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "out" / "m3"
+OUT = ROOT / "out" / "zombie_single"
 RUN = OUT / "run.json"
 
 
@@ -34,7 +34,9 @@ def _complete() -> bool:
     return bool(run.get("status") == "complete" and all((OUT / f["name"]).is_file() for f in run["files"]))
 
 
-pytestmark = pytest.mark.skipif(not _complete(), reason="needs out/m3 (assist render scenarios/zombie_single.yaml)")
+pytestmark = pytest.mark.skipif(
+    not _complete(), reason="needs out/zombie_single (assist run scenarios/zombie_single.yaml --sink wav)"
+)
 
 WIN_S = 1.0
 MIN_CN0_DBHZ = 30.0
@@ -93,8 +95,8 @@ def test_full_pass_doppler_and_level(rendered: _Render) -> None:
         f"C/N0 error mean {lvl_err.mean():+.3f} dB, RMS {np.sqrt(np.mean(lvl_err**2)):.3f} dB"
     )
     assert len(f_err) >= 60
-    assert np.sqrt(np.mean(f_err**2)) <= 0.1  # T-DOP over the pass
-    assert abs(lvl_err.mean()) <= 0.1  # T-LVL over the pass
+    assert np.sqrt(np.mean(f_err**2)) <= 0.1  # Doppler over the pass
+    assert abs(lvl_err.mean()) <= 0.1  # level over the pass
     assert np.sqrt(np.mean(lvl_err**2)) <= 0.4
 
 

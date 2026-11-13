@@ -1,4 +1,4 @@
-"""Random expressions (plan §3.3): `uniform(a,b)`, `normal(mu,sigma)`, `randint(a,b)` (inclusive),
+"""Random expressions: `uniform(a,b)`, `normal(mu,sigma)`, `randint(a,b)` (inclusive),
 `choice([..])`, `sample([..],k)`, `bernoulli(p)`.
 
 Drawn at resolve from the stream ("resolve", source_id, field_path), where field_path is the path inside the

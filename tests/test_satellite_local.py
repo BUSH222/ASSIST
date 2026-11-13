@@ -1,4 +1,5 @@
-"""M6 checks against real orbits and the M1 reference (local only: they need the element snapshots in samples/).
+"""Satellite signals against real orbits and the recording's ORBCOMM reference (local only: they need the element
+snapshots in samples/).
 
 1. `scenarios/meteor_lora.yaml`: METEOR-M2 3 and M2-4 on 137.9 MHz, back to back, with Starlink-borne LoRa on the
    overlapping channel (137.9265 MHz). Rendered by random access in short windows across both passes:
@@ -9,12 +10,13 @@
      gives a peak at its received frequency (truth, within 40 Hz) > 6 dB over the median, for every burst whose
      symbol energy over (N0 + METEOR's spectral density) is >= 4 dB; weaker ones (from Starlinks near the horizon)
      may be lost under METEOR, as they would be on air.
-2. ORBCOMM FM117 in the recording's P2b window (M1 reference, 2026-11-01 17:02:25 UTC + 169 s, 0-10.6 deg):
-   the orbcomm preset on S-5 and S-8 with FM117's measured transmit offsets, through the same P2b analysis as the
-   recording: symbol rate 4800 +- 0.48, alpha 0.4 +- 0.02, Doppler residual RMS <= 1.5 Hz (M1: 0.9), rest frequency
-   within 1 Hz of truth; median C/N0 within 2 dB of the recording's (which fades by 3 dB RMS about the model, the
-   simulation does not). Level chain: the estimator's bias b against the simulation's truth is < 1 dB, and M2's level
-   fit on the simulated blocks returns the `orbcomm` link constant that went in (191.6 dB-Hz) plus b, within 0.05 dB.
+2. ORBCOMM FM117 in the recording's reference window (2026-11-01 17:02:25 UTC + 169 s, 0-10.6 deg):
+   the orbcomm preset on S-5 and S-8 with FM117's measured transmit offsets, through the same analysis as the
+   recording: symbol rate 4800 +- 0.48, alpha 0.4 +- 0.02, Doppler residual RMS <= 1.5 Hz (the recording: 0.9), rest
+   frequency within 1 Hz of truth; median C/N0 within 2 dB of the recording's (which fades by 3 dB RMS about the model,
+   the simulation does not). Level chain: the estimator's bias b against the simulation's truth is < 1 dB, and the
+   level fit on the simulated blocks returns the `orbcomm` link constant that went in (191.6 dB-Hz) plus b, within 0.05
+   dB.
 """
 
 from pathlib import Path
@@ -198,7 +200,7 @@ def test_orbcomm_fm117_through_the_m1_p2b_analysis(tmp_path: Path) -> None:
                 "channels": ["S-5", "S-8"],
                 "stx1": {"offset_hz": round(rest[0] - 137.46e6, 3)},
                 "stx2": {"offset_hz": round(rest[1] - 137.7125e6, 3)},
-                "gateway": {"enabled": False},  # M1: no gateway in the segment (+0.44 dB at 137.56 MHz)
+                "gateway": {"enabled": False},  # the recording: no gateway in the segment (+0.44 dB at 137.56 MHz)
             }
         ],
     }
@@ -222,8 +224,8 @@ def test_orbcomm_fm117_through_the_m1_p2b_analysis(tmp_path: Path) -> None:
         p50, p50_ref = r["cn0_dbhz_p10_p50_p90"][1], c["cn0_dbhz_p10_p50_p90"][1]
         assert abs(p50 - p50_ref) <= 2.0, (p50, p50_ref)
         sims.append(r)
-    # The level chain. The simulation renders truth; the P2b per-block C/N0 estimator reads it with a bias b (its
-    # N0 ring at 10-20 kHz sits on the channel filter's roll-off, -0.3 dB, and on the noise shape). M2's level fit
+    # The level chain. The simulation renders truth; the per-block C/N0 estimator reads it with a bias b (its
+    # N0 ring at 10-20 kHz sits on the channel filter's roll-off, -0.3 dB, and on the noise shape). The level fit
     # on the simulated blocks then returns the link constant that went in (191.6 dB-Hz) plus b, so the calibration,
     # fitted with the same estimator on the recording, carries the same b.
     lv = p2b.fit_level(sims, t0, row, st, ref["level"]["saw_loss_db"])

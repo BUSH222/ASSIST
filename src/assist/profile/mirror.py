@@ -1,4 +1,4 @@
-"""P9: mirror (image) measurements.
+"""Mirror (image) measurements.
 
 Image rejection at an offset: a strong source band [f_src +- half_bw] and its mirror about fc (bins k and
 FFT_SIZE - k). For every spectrum (row or per-minute mean) the excess power over the local noise is measured in both

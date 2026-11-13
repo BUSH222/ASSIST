@@ -1,4 +1,4 @@
-"""Element store and `elements fetch` (plan §6.1). No network: fetch is tested with a fake opener."""
+"""Element store and `elements fetch`. No network: fetch is tested with a fake opener."""
 
 import csv
 import datetime as dt

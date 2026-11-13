@@ -1,13 +1,13 @@
-"""T-SIG and T-SCH (plan §5, §10.1): the M6 satellite signals on their own, at their narrow rate, noiseless.
+"""The satellite signals on their own, at their narrow rate, noiseless.
 
 - oqpsk (METEOR LRPT): unit power; occupied bandwidth rs (1 + alpha) and fitted alpha; the 4th-power line used by
   ADRIFT's suppressed-carrier branch; CADU framing (ASM, randomiser, convolutional code across frames); frames never
   repeat.
-- sdpsk (ORBCOMM subscriber): every transition +-90 deg after the matched filter; the M1 estimators (P2b) find
+- sdpsk (ORBCOMM subscriber): every transition +-90 deg after the matched filter; the profile tool's estimators find
   alpha 0.4 and 4800 sym/s.
 - oqpsk_burst (ORBCOMM gateway): block edges within 0.1 ms of the schedule, off time 627-692 ms, 4 or 5 blocks.
 - lora: Semtech airtime, burst length, chirp slope and structure; schedule draws (sf, payload, channel) keyed.
-Every kind: any window is the same slice of a longer one (T-WIN).
+Every kind: any window is the same slice of a longer one.
 """
 
 import itertools
@@ -188,8 +188,8 @@ def test_sdpsk_transitions_are_plus_minus_90_degrees() -> None:
 
 
 def test_sdpsk_matches_the_p2b_reference_estimators() -> None:
-    """The M1 estimators (symbol rate from |x|^2, RC fit to the PSD) at 50 kS/s with noise: alpha 0.4 +- 0.02,
-    4800 sym/s within 0.01 %."""
+    """The profile tool's estimators (symbol rate from |x|^2, RC fit to the PSD) at 50 kS/s with noise: alpha 0.4 +-
+    0.02, 4800 sym/s within 0.01 %."""
     s = _sig("sdpsk")
     x = s.render(T0 * 38_400, 60 * 38_400, 38_400)
     y = resample_poly(x.astype(np.complex128), 125, 96)  # 38.4 -> 50 kS/s

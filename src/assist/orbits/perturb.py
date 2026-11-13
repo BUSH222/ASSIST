@@ -1,4 +1,4 @@
-"""Catalog + perturbation (plan §6.1): the truth orbit is the published element set, perturbed; the catalog output
+"""Catalog + perturbation: the truth orbit is the published element set, perturbed; the catalog output
 keeps the published set (mimicking OMM error).
 """
 

@@ -1,4 +1,4 @@
-"""Link budget (plan §6.2), carrier model (§6.3), schedules and AM (§6.4): T-SCH."""
+"""Link budget, carrier model, schedules and AM."""
 
 import json
 import math
@@ -44,7 +44,7 @@ def test_cn0_zenith_round_trip() -> None:
 
 
 def test_meteor_calibration_reproduces_m1_p_tx() -> None:
-    """Link constants from meteor_cal.json give M1's P_tx at T_ant 300/500/1000 K."""
+    """Link constants from meteor_cal.json give the calibration's P_tx at T_ant 300/500/1000 K."""
     mc = json.loads((ROOT / "profiles/vhf137/meteor_cal.json").read_text())
     cal, _ = calibrations(str(ROOT / "profiles/vhf137"), load_band("vhf137"))
     for t_ant, row in mc["p_tx_dbw_for_t_ant"].items():
@@ -90,7 +90,7 @@ def test_carrier_per_pass_terms_are_keyed_by_aos() -> None:
     assert (b == to_mhz(137.9e6)).all() and (s == 0).all()
 
 
-# --- schedules (T-SCH) ---
+# --- schedules ---
 
 
 def test_on_off_is_exactly_40_on_180_off() -> None:

@@ -1,8 +1,8 @@
-"""`gfsk` (M7): VDL Mode 4 style bursts, 19.2 kbit/s Gaussian FSK (modulation index 0.25, BT 0.28), an event signal.
+"""`gfsk`: VDL Mode 4 style bursts, 19.2 kbit/s Gaussian FSK (modulation index 0.25, BT 0.28), an event signal.
 
-M7 found that the bursts on 136.925 MHz (one of the VDL Mode 4 signalling channels) are not D8PSK: their envelope is
-constant and their instantaneous frequency swings +-2.4 kHz (= h rb / 2), with a centre-peaked spectrum; the bursts
-on 136.975 MHz are VDL Mode 2 D8PSK (`d8psk`).
+The recording shows that the bursts on 136.925 MHz (one of the VDL Mode 4 signalling channels) are not D8PSK: their
+envelope is constant and their instantaneous frequency swings +-2.4 kHz (= h rb / 2), with a centre-peaked spectrum;
+the bursts on 136.975 MHz are VDL Mode 2 D8PSK (`d8psk`).
 
 A burst is a whole number of bits on the absolute bit grid (bit k at Unix time k / rb; the first bit is the first
 grid point at or after the event start). The bits are random (`random_bytes` keyed (source, emitter, "burst") with

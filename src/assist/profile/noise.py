@@ -1,7 +1,7 @@
-"""P3: noise PSD, DC spike, diurnal level curve and noise regimes.
+"""Noise PSD, DC spike, diurnal level curve and noise regimes.
 
-Reference shape: the two .raw days (raw rtl_tcp stream, the same path ASSIST emulates and that M9 compares
-against). Per day: per-bin median over per-minute means. Where a day's waterfall is clipped at its -5 dB floor
+Reference shape: the two .raw days (raw rtl_tcp stream, the same path ASSIST emulates). Per day: per-bin median
+over per-minute means. Where a day's waterfall is clipped at its -5 dB floor
 (SAW notch below ~136.05 MHz) the recording's shape is spliced in. Persistent signals (strong VDL, birdies, DC)
 are interpolated out, then the shape is smoothed. 0 dB = median over the flat passband.
 """

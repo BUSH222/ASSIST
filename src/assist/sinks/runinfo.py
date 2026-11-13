@@ -1,4 +1,4 @@
-"""`run.json` (plan §7.2): provenance next to every render or serving session. Not truth: truth is computed from the
+"""`run.json`: provenance next to every render or serving session. Not truth: truth is computed from the
 scenario.
 
 It holds the resolved scenario (so `Scene` can be rebuilt from it), its hash, the package version and engine, the
@@ -22,10 +22,10 @@ if TYPE_CHECKING:
 
 
 def engine_name(rd: Renderer) -> str:
-    """The kernels behind a render: "c++ (M7)" (with "-march=native" when built so), or "numpy reference (M7)"."""
+    """The kernels behind a render: "c++" (with "-march=native" when built so), or "numpy reference"."""
     if rd.dsp.__name__ == "assist.dsp_ref":
-        return "numpy reference (M7)"
-    return "c++, -march=native (M7)" if getattr(rd.dsp, "_native", False) else "c++ (M7)"
+        return "numpy reference"
+    return "c++, -march=native" if getattr(rd.dsp, "_native", False) else "c++"
 
 
 def run_info(

@@ -1,4 +1,4 @@
-# Birdies (plan §6.5): steady narrow lines generated inside the receiver (local). The preset holds only the platform;
+# Birdies: steady narrow lines generated inside the receiver (local). The preset holds only the platform;
 # list the tones as emitters (cw, or noise_band for a wide one), as bands/vhf137/terrestrial_default.yaml does from
 # the profile's birdie list.
 platform: local

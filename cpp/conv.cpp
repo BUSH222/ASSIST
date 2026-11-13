@@ -1,4 +1,4 @@
-// METEOR LRPT channel coding (plan §5). numpy twin: src/assist/dsp_ref/conv.py
+// METEOR LRPT channel coding. numpy twin: src/assist/dsp_ref/conv.py
 #include "conv.hpp"
 
 namespace assist {

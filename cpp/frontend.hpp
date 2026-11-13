@@ -1,4 +1,4 @@
-// Receiver front end kernels (plan §4.3, §4.4): white noise, noise shaping, ADC.
+// Receiver front end kernels: white noise, noise shaping, ADC.
 // numpy twin: src/assist/dsp_ref/frontend.py
 #pragma once
 

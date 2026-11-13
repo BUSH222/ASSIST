@@ -1,4 +1,4 @@
-"""Wideband local emitters (M7): interference inside the receiver rendered at fs in the time domain (`noise_comb`, the
+"""Wideband local emitters: interference inside the receiver rendered at fs in the time domain (`noise_comb`, the
 USB humps). They are added to the signals of a chunk before the ADC: no synthesiser, no receiver response, no
 geometry. Levels are relative to the noise density k T_sys (the noise shape's 0 dB).
 """

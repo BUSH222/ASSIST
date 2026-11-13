@@ -1,4 +1,4 @@
-"""FFT waterfall sink: validation, the maths against samples/waterfall.py's, chunk-size independence, `assist fft`."""
+"""FFT waterfall sink: validation, the maths against samples/waterfall.py's, chunk-size independence, `assist run`."""
 
 import json
 from pathlib import Path

@@ -342,7 +342,7 @@ def bench(
     set_: SetOpt = None,
     plugin: PluginOpt = None,
 ) -> None:
-    """Render speed vs real time, on one worker (one core) and on N, without writing IQ (plan §4.5)."""
+    """Render speed vs real time, on one worker (one core) and on N, without writing IQ."""
     import json
 
     from assist.engine import bench as bn

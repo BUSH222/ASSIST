@@ -5110,7 +5110,7 @@
  ],
  "gateway_137_56_excess_db": 0.439667,
  "level": {
-  "method": "Transmit level from the per-block C/N0, with the simulator's link model (plan \u00a76.2).\n\nPath gain = QFH(off-nadir) + QFH(90 - el) - FSPL(range, f): the QFH pattern at both ends, perfect horizon.\nPer channel, the link constant is the median of C/N0 - path gain over blocks where the carrier is tracked\n(|Doppler residual| < max_residual_hz), the satellite is above the horizon and C/N0 is finite. The median\nkeeps the deep fade 90 s into the segment from biasing it. P_tx = link constant + 10 log10(k T_sys).\n",
+  "method": "Transmit level from the per-block C/N0, with the simulator's link model.\n\nPath gain = QFH(off-nadir) + QFH(90 - el) - FSPL(range, f): the QFH pattern at both ends, perfect horizon.\nPer channel, the link constant is the median of C/N0 - path gain over blocks where the carrier is tracked\n(|Doppler residual| < max_residual_hz), the satellite is above the horizon and C/N0 is finite. The median\nkeeps the deep fade 90 s into the segment from biasing it. P_tx = link constant + 10 log10(k T_sys).\n",
   "per_channel": [
    {
     "channel_hz": 137460402.472412,

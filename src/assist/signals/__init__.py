@@ -1,1 +1,1 @@
-"""Signal kinds (plan §5)."""
+"""Signal kinds."""

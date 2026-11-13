@@ -1,4 +1,4 @@
-"""Schedules and amplitude modulation (plan §6.4).
+"""Schedules and amplitude modulation.
 
 All schedules are functions of absolute Unix time, so any window can be evaluated on its own:
 - `continuous`: always on.
@@ -8,13 +8,13 @@ All schedules are functions of absolute Unix time, so any window can be evaluate
   next. Generated per UTC hour slot from the emitter's keyed stream (source_id, emitter_id, "slot", hour_index);
   each slot starts a fresh chain at slot start + one gap, so slots are independent (random access).
 - `poisson_events`: per hour slot, N ~ Poisson(rate for that UTC hour), starts uniform in the hour, durations from
-  the configured distribution (clipped to max_s <= 1 h). Same keyed stream per slot. With `min_gap_s` (M7, one
+  the configured distribution (clipped to max_s <= 1 h). Same keyed stream per slot. With `min_gap_s` (one
   transmitter) an event starting less than min_gap_s after the previous kept event's end is dropped afterwards (a
   dead time: the kept rate is rate / (1 + rate * (duration + min_gap_s))).
 
-Event signals (LoRa, M6) set an event maker: each event's duration and parameters (spreading factor, payload
+Event signals (LoRa) set an event maker: each event's duration and parameters (spreading factor, payload
 length, the frequency index of a multi-frequency emitter) come from it, drawn from the same slot stream in place of
-the duration distribution. M7: so do emitters with per-event draws (frequency offset and level), and `ramp_ms`
+the duration distribution. So do emitters with per-event draws (frequency offset and level), and `ramp_ms`
 gives continuous signals under an event schedule raised-cosine ramps centred on each event's edges.
 """
 

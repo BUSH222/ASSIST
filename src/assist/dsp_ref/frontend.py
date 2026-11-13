@@ -1,4 +1,4 @@
-"""Twins of cpp/frontend.cpp: white noise, noise shaping, ADC (plan §4.3, §4.4).
+"""Twins of cpp/frontend.cpp: white noise, noise shaping, ADC.
 
 `white` reproduces the C++ kernel bit for bit: Philox4x32-10 in uint64 arithmetic, and a Box-Muller transform whose
 ln, sin and cos are polynomials in float32 using only + - * / and sqrt, all exactly rounded, evaluated in the same
@@ -108,7 +108,7 @@ def noise(
     n_hist: int,
     out: np.ndarray | None = None,
 ) -> NDArray[np.complex64]:
-    """Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save in segments of `sub` samples (plan §4.3)."""
+    """Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save in segments of `sub` samples."""
     tf = np.ascontiguousarray(taps_f, dtype=np.complex64)
     if tf.ndim != 1:
         raise ValueError("taps_f must be 1-D")

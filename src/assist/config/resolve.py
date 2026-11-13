@@ -1,4 +1,4 @@
-"""`resolve` (plan §3.3): turn a scenario into a self-contained canonical document.
+"""`resolve`: turn a scenario into a self-contained canonical document.
 
 After loading (includes, --set, band defaults, presets), drawing random expressions and validating, resolve fills
 in everything that depends on files or draws:
@@ -7,7 +7,7 @@ in everything that depends on files or draws:
 - synthetic passes: absolute AOS, direction/side (keyed draws if absent) and the solved orbit;
 - keyed defaults: on/off phase, AM phase; channels (names from the band's channel table, e.g. ORBCOMM S-1 .. S-12)
   turned into frequencies, an emitter's `channel` into its freq_hz; frequencies quantised to 1 mHz;
-- levels as p_tx_dbw (from p_tx_dbw, cn0_zenith_dbhz or a calibration); ground and local transmitters (M7) as
+- levels as p_tx_dbw (from p_tx_dbw, cn0_zenith_dbhz or a calibration); ground and local transmitters as
   rx_dbm (from cn0_dbhz or rx_dbm);
 - package version and content hashes of the band and profile.
 
@@ -44,7 +44,7 @@ from assist.station import DEFAULT_FILE, Station, load_station
 from assist.timebase import format_iso, parse_iso, parse_time
 
 MU_KM3_S2 = 398600.8
-METEOR_BAND_HZ = 100e3  # M1 P10 measured SNR in 137.9 +- 50 kHz
+METEOR_BAND_HZ = 100e3  # the METEOR calibration measured SNR in 137.9 +- 50 kHz
 METEOR_AUTO = "meteor_auto"  # the per-satellite METEOR calibration of the source's NORAD id, else `meteor`
 
 

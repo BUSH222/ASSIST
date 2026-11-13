@@ -1,4 +1,4 @@
-"""Keyed randomness (plan §3.2).
+"""Keyed randomness.
 
 Every random draw comes from a stream keyed by stable names (source and emitter ids, absolute time indices), never
 by list position or Python's hash(). Adding or removing a source therefore never changes another source's draws.
@@ -33,7 +33,7 @@ class KeyedRng:
 
     def key64(self, *key: str | int) -> int:
         """A 64-bit key from the same seed sequence, for counter-based generators outside numpy (the C++ noise,
-        whose counter is the absolute hop index, plan §3.2)."""
+        whose counter is the absolute hop index)."""
         return int(self._seq(key).generate_state(1, np.uint64)[0])
 
     def _seq(self, key: tuple[str | int, ...]) -> np.random.SeedSequence:

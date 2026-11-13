@@ -1,4 +1,4 @@
-"""Chunk-parallel file rendering (plan §4.5): worker processes, each with its own Renderer.
+"""Chunk-parallel file rendering: worker processes, each with its own Renderer.
 
 The window is cut at absolute multiples of TASK_S seconds; the tasks run on a pool of spawned processes and their
 bytes come back in order, at most two tasks per worker in flight. Every chunk is a pure function of the resolved

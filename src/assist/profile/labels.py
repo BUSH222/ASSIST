@@ -1,4 +1,4 @@
-"""P12: event list and label sheet (plan §9.1).
+"""Event list and label sheet.
 
 The build writes every detected event of the waterfall days to <work>/events.csv. `profile labels` draws a
 stratified sample (about 200 events), renders a crop for each (+-50 kHz, 60 s before and after, from the .raw file)

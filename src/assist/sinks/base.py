@@ -1,4 +1,4 @@
-"""Sink interface (PLAN.md R3): where the station's uint8 IQ stream goes.
+"""Sink interface: where the station's uint8 IQ stream goes.
 
 A sink is a class registered under a name with `@register_sink("name")`; a scenario lists the sinks it uses, with
 their settings, under `sinks:` (a list of one-key mappings), and `assist run` drives them:

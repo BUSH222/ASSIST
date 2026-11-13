@@ -1,4 +1,4 @@
-"""T-RTL (plan §10.1): rtl_tcp header, command parsing, fan-out, pacing; the rtl_tcp sink of `assist run`.
+"""The rtl_tcp server: header, command parsing, fan-out, pacing; the rtl_tcp sink of `assist run`.
 
 Most tests use a stub source whose sample n carries n mod 2^16 (I = low byte, Q = high byte), so continuity and
 chunk alignment can be read from the bytes. `test_pacing_60s` runs a real minute of stream.
@@ -271,7 +271,7 @@ def test_stuck_client_is_disconnected(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def test_pacing_60s() -> None:
-    """T-RTL: the stream rate over 60 s of real time is fs within 0.1 %, with no stalls."""
+    """The stream rate over 60 s of real time is fs within 0.1 %, with no stalls."""
     srv = _server(ring=147)
 
     async def body():

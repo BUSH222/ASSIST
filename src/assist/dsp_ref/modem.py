@@ -1,7 +1,7 @@
-"""Twins of cpp/modem.cpp: random payload bytes, pulse shaping, LoRa chirps, carrier NCO (plan §5).
+"""Twins of cpp/modem.cpp: random payload bytes, pulse shaping, LoRa chirps, carrier NCO.
 
 `random_bytes` is exact (integer maths). The others compute in float64 like the C++ code, in a different order, so
-they agree to rounding (T-REF).
+they agree to rounding.
 """
 
 from typing import TYPE_CHECKING

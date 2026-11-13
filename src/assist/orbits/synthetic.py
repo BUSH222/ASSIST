@@ -1,4 +1,4 @@
-"""Synthetic orbits (plan §6.1): Kepler elements as SGP4 mean elements, and passes solved for AOS and max elevation.
+"""Synthetic orbits: Kepler elements as SGP4 mean elements, and passes solved for AOS and max elevation.
 
 A synthetic pass is a circular orbit (e = 0, argument of perigee 0) with the requested altitude and inclination,
 epoch at the requested AOS. RAAN and mean anomaly are seeded from spherical geometry, then refined with

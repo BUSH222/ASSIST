@@ -1,1 +1,2 @@
-"""Output sinks: cu8 files and run.json (M3); the rtl_tcp server follows in M4 (plan §7)."""
+"""Output sinks: the sink interface, the runner behind `assist run`, the core sinks (wav, cu8, fft, rtl_tcp) and
+run.json."""

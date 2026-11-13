@@ -1,7 +1,7 @@
-"""Element store (plan §6.1): OMM CSV (retlector layout), OMM JSON and TLE files, and `assist elements fetch`.
+"""Element store: OMM CSV (retlector layout), OMM JSON and TLE files, and `assist elements fetch`.
 
 Every element set of every file is kept per NORAD id. A scenario takes the set whose epoch is nearest its clock
-start (ties go to the newer one); the profile tool keeps its M1 rule, the newest set per object (`load_newest`).
+start (ties go to the newer one); the profile tool keeps its own rule, the newest set per object (`load_newest`).
 Files are only read here; the network is touched only by `fetch`, which the user runs explicitly.
 """
 
@@ -188,7 +188,7 @@ def staleness_warning(es: ElementSet, t_unix: float) -> str | None:
     """A warning when the window starts more than 14 days after the set's epoch.
 
     Epochs after the window never warn: predictive element sets (e.g. CXO, XMM-Newton) have future epochs on
-    purpose, and back-propagation to past dates is the documented way to cover them (plan §6.1).
+    purpose, and back-propagation to past dates is the documented way to cover them.
     """
     age_days = (t_unix - es.epoch_unix) / 86400.0
     if age_days > STALE_DAYS:

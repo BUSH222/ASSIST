@@ -1,4 +1,4 @@
-// Modulation kernels (plan §5): random payload bytes, pulse shaping, LoRa chirps, the carrier NCO.
+// Modulation kernels: random payload bytes, pulse shaping, LoRa chirps, the carrier NCO.
 // numpy twin: src/assist/dsp_ref/modem.py
 #pragma once
 

@@ -1,4 +1,5 @@
-"""The M6 satellite signals through the whole engine (plan §10.1): presets, levels, T-LVL, timing, P2b, T-WIN, T-KEY.
+"""The satellite signals through the whole engine: presets, levels, timing, the ORBCOMM estimators, window
+independence and keyed draws.
 
 One synthetic scene, all sources up at the start (no samples needed, flat noise shape: no profile):
 - `met`: METEOR LRPT (meteor_lrpt preset) on 137.9 MHz;
@@ -7,7 +8,7 @@ One synthetic scene, all sources up at the start (no samples needed, flat noise 
 Checks:
 - clean signal power in each band = truth rx level (no profile: H_rx = 1), within 0.05 dB;
 - C/N0 from the uint8 stream (noise and ADC) = truth within 0.3 dB;
-- ORBCOMM subscriber through the M1 P2b estimators: alpha 0.4 +- 0.02, 4800 sym/s within 0.01 %;
+- ORBCOMM subscriber through the profile tool's estimators: alpha 0.4 +- 0.02, 4800 sym/s within 0.01 %;
 - gateway block edges and LoRa burst edges at the receiver within 0.1 ms of the schedule; LoRa chirp slope;
 - window independence, worker processes and adding a source leave the bytes / other sources unchanged.
 """
@@ -233,12 +234,12 @@ def test_cn0_from_the_stream_matches_truth(scene: Scene) -> None:
     assert abs(got - 10 * np.log10(cn0)) < 0.3, ("lora", got, 10 * np.log10(cn0))
 
 
-# --- ORBCOMM against the M1 reference (P2b) ---
+# --- ORBCOMM against the profile tool's reference ---
 
 
 def test_orbcomm_through_the_p2b_estimators(scene: Scene) -> None:
-    """The subscriber channel cut out at 50 kS/s like the M1 reference, Doppler removed with truth: alpha 0.4 +- 0.02,
-    4800 sym/s +- 0.01 %."""
+    """The subscriber channel cut out at 50 kS/s like the profile tool's reference, Doppler removed with truth: alpha
+    0.4 +- 0.02, 4800 sym/s +- 0.01 %."""
     rd = Renderer(scene)
     secs = 20
     n0 = sample_at(T0 + 20, FS)

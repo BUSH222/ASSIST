@@ -1,11 +1,12 @@
 """Checks on the local data in samples/ (skipped without it, as in CI).
 
-M2 done-when: modelled METEOR levels reproduce the waterfall passes within M1's residual.
+Modelled METEOR levels reproduce the waterfall passes within the calibration's residual.
 
-The passes are re-measured with the M1 code (P10: band SNR per row). The model goes through the simulator's path:
-a scenario per waterfall day with both METEORs at their calibrated levels (`cal: meteor_m2_3` / `meteor_m2_4`),
-resolved and built into a scene (elements nearest the day, spline geometry, link budget, T_sys). Rows are compared
-as in M1's fit: 10 log10(1 + SNR), elevation >= 3 deg, passes with max elevation > 5 deg. Skipped without samples/.
+The passes are re-measured with the profile tool (`meteor_cal`: band SNR per row). The model goes through the
+simulator's path: a scenario per waterfall day with both METEORs at their calibrated levels (`cal: meteor_m2_3` /
+`meteor_m2_4`), resolved and built into a scene (elements nearest the day, spline geometry, link budget, T_sys). Rows
+are compared as in the calibration's fit: 10 log10(1 + SNR), elevation >= 3 deg, passes with max elevation > 5 deg.
+Skipped without samples/.
 """
 
 import json
@@ -84,9 +85,9 @@ def test_modelled_meteor_levels_match_waterfall_passes(tmp_path: Path, monkeypat
         "median_db": float(np.median(allr)),
         "mean_db": float(np.mean(allr)),
         "rms_db_per_satellite": {METEORS[n][1]: v for n, v in rms.items()},
-        "m1_rms_db": mc["fit_both"]["residual_rms_db"],
+        "calibration_rms_db": mc["fit_both"]["residual_rms_db"],
     }
-    print(json.dumps(summary))  # numbers for the checkpoint (pytest -s)
+    print(json.dumps(summary))  # the numbers (pytest -s)
     assert allr.size == mc["fit_both"]["rows"]
     assert total <= mc["fit_both"]["residual_rms_db"]
     for n, (_sid, _cal) in METEORS.items():

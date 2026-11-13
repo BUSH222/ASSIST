@@ -1,4 +1,4 @@
-// Modulation kernels (plan §5). numpy twin: src/assist/dsp_ref/modem.py
+// Modulation kernels. numpy twin: src/assist/dsp_ref/modem.py
 #include "modem.hpp"
 
 #include <algorithm>

@@ -40,6 +40,26 @@ def _bad(tmp_path: Path, name: str, body: str) -> Any:
 # --- the examples, as external modules ---
 
 
+def _guide_plugin(tmp_path: Path, name: str) -> Any:
+    """The complete plugin PLUGINS.md prints for `name` (its fenced python block that opens with that docstring)."""
+    blocks = (ROOT / "PLUGINS.md").read_text().split("```python\n")[1:]
+    (code,) = [b.split("```")[0] for b in blocks if b.startswith(f'"""`{name}`')]
+    p = tmp_path / f"{name}.py"
+    p.write_text(code)
+    return testing.load_plugin(str(p))
+
+
+def test_guide_signal_conforms(tmp_path: Path) -> None:
+    mod = _guide_plugin(tmp_path, "fsk2")
+    testing.check_signal(mod.Fsk2)
+    testing.check_signal("fsk2", {"rb": 4800, "sps": 5}, seed=3)
+
+
+def test_guide_sink_conforms(tmp_path: Path) -> None:
+    mod = _guide_plugin(tmp_path, "power_log")
+    testing.check_sink(mod.PowerLog, seconds=3.0)
+
+
 def test_example_signal_conforms() -> None:
     mod = testing.load_plugin(f"{EXAMPLES}/pretty_gfsk.py")
     testing.check_signal(mod.PrettyGfsk)

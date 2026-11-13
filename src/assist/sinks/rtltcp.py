@@ -1,4 +1,4 @@
-"""rtl_tcp server (plan §7.1): the station's uint8 IQ stream for read-only clients such as SDR++'s rtl_tcp source.
+"""rtl_tcp server: the station's uint8 IQ stream for read-only clients such as SDR++'s rtl_tcp source.
 
     sinks:
       - rtl_tcp: {host: 127.0.0.1, port: 1234, pacing: realtime, lookahead: 1s}

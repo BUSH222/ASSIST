@@ -1,4 +1,4 @@
-"""Front end (plan §4.3, §4.4): noise FIR design, the band fallback, profile checks, ADC quantisation."""
+"""Front end: noise FIR design, the band fallback, profile checks, ADC quantisation."""
 
 import json
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""External modules (PLAN.md R1): the registry, `plugins:` loading, and the example signal `pretty_gfsk`."""
+"""External modules: the registry, `plugins:` loading, and the example signal `pretty_gfsk`."""
 
 import itertools
 import json
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parent.parent
 PLUGIN = "examples/plugins/pretty_gfsk.py"
+PACKAGE = ROOT / "examples/assist-examples"
 BASIC = ROOT / "tests/fixtures/scenario_basic.yaml"
 FS = 2_400_000
 CORE = ["cw", "oqpsk", "oqpsk_burst", "sdpsk", "lora", "d8psk", "gfsk", "am", "noise_band", "noise_comb"]
@@ -172,14 +173,14 @@ def test_bad_entries_and_failing_plugins(tmp_path: Path) -> None:
 
 
 def test_module_and_name_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _plugin(tmp_path, "modplug_r1", ["modkind"], body='\n__version__ = "2.5"\n')
+    _plugin(tmp_path, "modplug_mod", ["modkind"], body='\n__version__ = "2.5"\n')
     monkeypatch.syspath_prepend(str(tmp_path))
-    out = plugins.activate([{"module": "modplug_r1"}])
-    assert out == [{"module": "modplug_r1", "version": "2.5", "api": "1.0"}] and "modkind" in registry.signals
+    out = plugins.activate([{"module": "modplug_mod"}])
+    assert out == [{"module": "modplug_mod", "version": "2.5", "api": "1.0"}] and "modkind" in registry.signals
     plugins.activate([])
     assert "modkind" not in registry.signals
-    out = plugins.activate(["modplug_r1"])  # a bare string: an entry point name, else a module
-    assert out == [{"name": "modplug_r1", "version": "2.5", "api": "1.0"}] and "modkind" in registry.signals
+    out = plugins.activate(["modplug_mod"])  # a bare string: an entry point name, else a module
+    assert out == [{"name": "modplug_mod", "version": "2.5", "api": "1.0"}] and "modkind" in registry.signals
     assert plugins.from_cli("psk8") == {"name": "psk8"} and plugins.from_cli("a/b.py") == {"path": "a/b.py"}
 
 
@@ -266,13 +267,13 @@ def test_named_plugin_from_an_entry_point(tmp_path: Path, monkeypatch: pytest.Mo
     """A `name:` entry is looked up in the entry-point group `assist.plugins` (faked here: nothing is installed)."""
     import importlib.metadata as md
 
-    _plugin(tmp_path, "eppkg_r4", ["epkind"])
+    _plugin(tmp_path, "eppkg_mod", ["epkind"])
     monkeypatch.syspath_prepend(str(tmp_path))
 
     class Dist:
         name, version = "assist-eppkg", "3.1"
 
-    ep = md.EntryPoint("epkind_plugin", "eppkg_r4", plugins.ENTRY_POINT_GROUP)
+    ep = md.EntryPoint("epkind_plugin", "eppkg_mod", plugins.ENTRY_POINT_GROUP)
     vars(ep).update(dist=Dist())
     monkeypatch.setattr(plugins, "_entry_points", lambda name: [ep] if name == "epkind_plugin" else [])
     out = plugins.activate(["epkind_plugin"])
@@ -282,6 +283,48 @@ def test_named_plugin_from_an_entry_point(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr(plugins, "_entry_points", lambda name: [ep, ep])
     with pytest.raises(plugins.PluginError, match="several installed packages provide this entry point"):
         plugins.activate(["epkind_plugin"])
+
+
+def test_example_package_has_the_loose_files_behind_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
+    """examples/assist-examples holds the same three modules as examples/plugins, each behind an entry point of its
+    pyproject.toml (read from the file and faked here: nothing is installed). A name loads only its own module."""
+    import importlib.metadata as md
+    import sys
+    import tomllib
+
+    src = PACKAGE / "src/assist_examples"
+    loose = sorted((ROOT / "examples/plugins").glob("*.py"))
+    assert sorted(f.name for f in src.glob("*.py")) == sorted(["__init__.py", *(f.name for f in loose)])
+    for f in loose:
+        assert (src / f.name).read_bytes() == f.read_bytes(), f"{f.name} differs from its copy in the package"
+    project = tomllib.loads((PACKAGE / "pyproject.toml").read_text())["project"]
+    table = project["entry-points"][plugins.ENTRY_POINT_GROUP]
+    assert table == {
+        "pretty_gfsk": "assist_examples.pretty_gfsk",
+        "tethered": "assist_examples.jitter_platform",
+        "tcp": "assist_examples.tcp_sink",
+    }
+
+    class Dist:
+        name, version = project["name"], project["version"]
+
+    eps = {name: md.EntryPoint(name, module, plugins.ENTRY_POINT_GROUP) for name, module in table.items()}
+    for ep in eps.values():
+        vars(ep).update(dist=Dist())
+    monkeypatch.syspath_prepend(str(PACKAGE / "src"))
+    monkeypatch.setattr(plugins, "_entry_points", lambda name: [eps[name]] if name in eps else [])
+    for m in [m for m in sys.modules if m.split(".")[0] == "assist_examples"]:
+        monkeypatch.delitem(sys.modules, m)
+
+    assert plugins.activate(["tcp"]) == [{"name": "tcp", "version": "0.1.0", "api": "1.0"}]
+    assert "tcp" in registry.sinks and "pretty_gfsk" not in registry.signals
+    assert "assist_examples.pretty_gfsk" not in sys.modules and "assist_examples.jitter_platform" not in sys.modules
+
+    out = plugins.activate(list(table))
+    assert [e["name"] for e in out] == list(table) and all("sha256" not in e for e in out)
+    assert signal_class("pretty_gfsk").__module__ == "assist_examples.pretty_gfsk"
+    assert "tethered" in registry.platforms and "tcp" in registry.sinks
+    assert {p.distribution for p in plugins.active()} == {"assist-examples"}
 
 
 def test_plugins_list_command(tmp_path: Path) -> None:
@@ -388,13 +431,13 @@ def test_changed_plugin_file_is_refused(tmp_path: Path) -> None:
 
 def test_scenario_file_finds_a_plugin_next_to_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "plugins").mkdir()
-    _plugin(tmp_path / "plugins", "local_r1", ["local_kind"])
-    doc = _doc({"plugins": [{"path": "plugins/local_r1.py"}]})
+    _plugin(tmp_path / "plugins", "local_plug", ["local_kind"])
+    doc = _doc({"plugins": [{"path": "plugins/local_plug.py"}]})
     doc["sources"][0]["emitters"][0].update(signal={"kind": "local_kind"}, schedule={"type": "continuous"})
     sc = tmp_path / "s.yaml"
     sc.write_text(yaml.safe_dump(doc))
     r = resolve(sc)  # cwd is the repo root: the file is found next to the scenario
-    assert r.scenario.plugins[0].path == "plugins/local_r1.py"
+    assert r.scenario.plugins[0].path == "plugins/local_plug.py"
     Scene(r.scenario)  # and again when the scene is built, from where it was found
     with pytest.raises(ConfigError, match="file not found"):
         resolve_document(load_scenario(sc), ROOT)  # no scenario directory given

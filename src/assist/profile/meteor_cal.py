@@ -1,12 +1,12 @@
-"""P10: METEOR level calibration from the waterfall days (perfect horizon).
+"""METEOR level calibration from the waterfall days (perfect horizon).
 
 Per row of each non-overlapping METEOR pass: SNR in 137.9 +- 50 kHz = (signal power in the band) / (noise power in
 the band), the noise being the same bins' baseline from rows 5-15 min outside the pass. Rows where pixels saturate
 (255, i.e. +25 dB over the file's calibration mean) use a fit of the LRPT spectrum (raised cosine, 72 kS/s,
 alpha 0.6, shifted by the predicted Doppler) to the unsaturated bins instead of the plain sum.
-Model: SNR_dB = C + G(off-nadir) + G(90 - el) - FSPL(R, f) with the QFH polynomial at both ends (plan §6.2), fitted
+Model: SNR_dB = C + G(off-nadir) + G(90 - el) - FSPL(R, f) with the QFH polynomial at both ends, fitted
 as 10*log10(1 + SNR) to the measured excess. C = P_tx + 30 - 10*log10(1000 k T_sys B) [dB]; only C is identifiable
-from SNR, so P_tx is reported for an assumed T_sys (T_ant + receiver chain, §4.3).
+from SNR, so P_tx is reported for an assumed T_sys (T_ant + receiver chain).
 """
 
 from dataclasses import dataclass

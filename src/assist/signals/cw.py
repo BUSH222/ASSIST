@@ -1,4 +1,4 @@
-"""`cw`: an unmodulated carrier (plan §5). Frequency, level and on/off come from the emitter."""
+"""`cw`: an unmodulated carrier. Frequency, level and on/off come from the emitter."""
 
 from typing import override
 

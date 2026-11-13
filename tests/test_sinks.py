@@ -1,4 +1,4 @@
-"""T-WAV (plan §10.1): WAV, RF64 and cu8 written and read back; SDR++ naming and splitting; run.json; `render`."""
+"""File sinks: WAV, RF64 and cu8 written and read back; SDR++ naming and splitting; run.json; `assist run`."""
 
 import datetime as dt
 import json
@@ -39,7 +39,8 @@ def test_sdrpp_name_is_local_time() -> None:
 
 
 def test_wav_round_trip_with_10_min_style_split(tmp_path: Path) -> None:
-    """Split every 1 s here (600 s by default): names, headers, sizes and every byte read back by the M1 reader."""
+    """Split every 1 s here (600 s by default): names, headers, sizes and every byte read back by the profile tool's
+    reader."""
     t0 = parse_iso("2026-11-04T12:00:00Z") + 0.25
     n0, n = sample_at(t0, FS), round(2.5 * FS)
     files = plan_files(tmp_path, "wav", FC, FS, "+03:00", n0, n, split_s=1.0)
@@ -142,12 +143,12 @@ def test_render_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert again.exit_code == 1 and "exists" in again.output
     before = wav.read_bytes()
     forced = runner.invoke(app, ["run", str(sc), "--sink", "wav", "-o", str(out), "--force"])
-    assert forced.exit_code == 0 and wav.read_bytes() == before  # T-DET: same bytes again
+    assert forced.exit_code == 0 and wav.read_bytes() == before  # deterministic: same bytes again
 
     part = runner.invoke(app, ["run", str(sc), "--sink", "cu8", "-o", str(tmp_path / "raw"), "--from", "+0.1s"])
     assert part.exit_code == 0, part.output
     (raw,) = (tmp_path / "raw").glob("*.cu8")
-    assert raw.read_bytes() == before[44 + 2 * 240_000 :]  # T-WIN through the CLI
+    assert raw.read_bytes() == before[44 + 2 * 240_000 :]  # window independence through the CLI
 
     # Two file sinks in one run get the same stream; the settings of one are changed with --set
     both = tmp_path / "both"
@@ -182,4 +183,4 @@ def test_render_cli_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     for cmd in ("render", "fft", "serve"):
         assert runner.invoke(app, [cmd, str(sc)]).exit_code != 0  # the old commands are gone
     ppm = runner.invoke(app, ["run", str(sc), "--sink", "wav", "-o", str(tmp_path / "o"), "--set", "frontend.ppm=2"])
-    assert ppm.exit_code == 2 and "until M7" in ppm.output
+    assert ppm.exit_code == 2 and "only 0 is supported" in ppm.output

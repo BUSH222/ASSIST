@@ -1,4 +1,4 @@
-# The 138.1104 MHz carrier (plan §6.5, M1): unmodulated bursts (one transmitter), Poisson-timed, lognormal durations,
+# The 138.1104 MHz carrier: unmodulated bursts (one transmitter), Poisson-timed, lognormal durations,
 # 5 ms ramps; each burst its own offset (+-0.2 kHz) and level. Give the rate and the level.
 platform: ground
 emitters:

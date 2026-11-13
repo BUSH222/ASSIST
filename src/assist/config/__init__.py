@@ -1,1 +1,1 @@
-"""Scenario configuration (plan §3.3): loading, random expressions, schema, resolve."""
+"""Scenario configuration: loading, random expressions, schema, resolve."""

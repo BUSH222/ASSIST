@@ -1,4 +1,4 @@
-"""P2b: ORBCOMM reference from the annotated segment of the recording.
+"""ORBCOMM reference from the annotated segment of the recording.
 
 Per channel: channelize to 50 kS/s; carrier track from the squared signal. Measured on the recording: like MSK,
 +-90 deg DPSK puts two equal lines in x^2 at 2 (df -+ rs/4), i.e. at df -+ 1200 Hz in carrier units, and the
@@ -204,7 +204,7 @@ def doppler_fit_for(
 def analyse(
     x: np.ndarray, t0_unix: float, f_centre_hz: float, row: dict[str, str], station: Station
 ) -> dict[str, Any]:
-    """Full P2b analysis of channelized samples `x` (50 kS/s around f_centre_hz) for one satellite."""
+    """Full reference analysis of channelized samples `x` (50 kS/s around f_centre_hz) for one satellite."""
     tr, dop = doppler_fit_for(x, t0_unix, f_centre_hz, row, station)
     t_dense = np.arange(0, len(x) / RATE + 1, 1.0)
     rr = geometry(row, station, t0_unix + t_dense).range_rate_m_s
@@ -256,7 +256,7 @@ def fit_level(
     saw_loss_db: float,
     max_residual_hz: float = 5.0,
 ) -> dict[str, Any]:
-    """Transmit level from the per-block C/N0, with the simulator's link model (plan §6.2).
+    """Transmit level from the per-block C/N0, with the simulator's link model.
 
     Path gain = QFH(off-nadir) + QFH(90 - el) - FSPL(range, f): the QFH pattern at both ends, perfect horizon.
     Per channel, the link constant is the median of C/N0 - path gain over blocks where the carrier is tracked

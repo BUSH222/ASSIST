@@ -42,7 +42,7 @@ dev = [
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
-# A fixed build dir lets editable installs rebuild the C++ module on import (dev loop, plan §2).
+# A fixed build dir lets editable installs rebuild the C++ module on import (dev loop).
 build-dir = "build/{wheel_tag}"
 editable.rebuild = true
 editable.verbose = false
@@ -70,7 +70,7 @@ exclude = [
     ".pytest_cache",
     "build",
     "dist",
-    "samples",  # local data + the plan, whose code blocks are pseudo-code (ruff also formats Markdown)
+    "samples",  # local data
 ]
 
 [tool.ruff.lint]

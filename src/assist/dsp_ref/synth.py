@@ -1,4 +1,4 @@
-"""Twin of cpp/synth.cpp: overlap-add synthesis in the frequency domain (plan §4.2)."""
+"""Twin of cpp/synth.cpp: overlap-add synthesis in the frequency domain."""
 
 from functools import cache
 from typing import TYPE_CHECKING
@@ -41,7 +41,7 @@ def synth(
     h_rx: ArrayLike | None = None,
     out: np.ndarray | None = None,
 ) -> NDArray[np.complex64]:
-    """Overlap-add synthesis of blocks b0 .. b0 + nb - 1 into (nb + 1) * m / 2 samples (plan §4.2).
+    """Overlap-add synthesis of blocks b0 .. b0 + nb - 1 into (nb + 1) * m / 2 samples.
 
     Block b0 + i of emitter e is streams[e][i * L / 2 : i * L / 2 + L] (L = lens[e]); it is synthesised only where
     active[e][i] is set: V = FFT_L(x * hann_L) * (m / L) * (-1)^(k b) * h_rx, added at bins k - L/2 .. k + L/2 - 1

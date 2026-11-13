@@ -1,4 +1,4 @@
-"""T-REF: every C++ kernel in assist._dsp matches its numpy twin in assist.dsp_ref (rtol 1e-5)."""
+"""Every C++ kernel in assist._dsp matches its numpy twin in assist.dsp_ref (rtol 1e-5)."""
 
 import os
 import subprocess
@@ -259,7 +259,7 @@ def test_kernels_reject_bad_arguments(impl) -> None:
         impl.white(1, 5, 1, 3)
 
 
-# --- modem and conv kernels (M6) ---
+# --- modem and conv kernels ---
 
 KEY = 0x9E3779B97F4A7C15
 

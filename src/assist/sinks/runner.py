@@ -1,4 +1,4 @@
-"""The runner behind `assist run` (PLAN.md R3): one workflow for every sink.
+"""The runner behind `assist run`: one workflow for every sink.
 
 It picks the sinks (the scenario's `sinks:`, or those named with `--sink`), builds the Renderer once, writes `run.json`
 before and after, and maps errors to exit codes. Then either

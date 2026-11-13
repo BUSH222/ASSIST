@@ -1,4 +1,4 @@
-"""Orbit modes and spline geometry (plan §4.1, §6.1): T-DOP (truth vs Skyfield), synthetic passes, perturbation."""
+"""Orbit modes and spline geometry: Doppler (truth vs Skyfield), synthetic passes, perturbation."""
 
 import datetime as dt
 from pathlib import Path
@@ -27,7 +27,7 @@ def meteor() -> SplineGeometry:
 
 
 def test_truth_doppler_matches_skyfield(meteor: SplineGeometry) -> None:
-    """T-DOP (truth part): spline range rate vs Skyfield's own value, as Doppler at 137.9 MHz: <= 0.01 Hz."""
+    """Doppler in truth: spline range rate vs Skyfield's own value, as Doppler at 137.9 MHz: <= 0.01 Hz."""
     ps = meteor.passes(T_REC, T_REC + 86400)
     assert len(ps) >= 6
     rng = np.random.default_rng(0)

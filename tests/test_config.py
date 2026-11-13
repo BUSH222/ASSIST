@@ -1,4 +1,4 @@
-"""Scenario loading, random expressions, schema and resolve (plan §3.3); T-DET (resolve part)."""
+"""Scenario loading, random expressions, schema and resolve, and the determinism of resolve."""
 
 import copy
 import json
@@ -204,7 +204,7 @@ def test_json_schema_exports() -> None:
 
 
 def test_resolve_is_deterministic_and_idempotent(tmp_path: Path) -> None:
-    """T-DET (resolve part): two resolves give identical JSON; resolving the result changes nothing."""
+    """Determinism of resolve: two resolves give identical JSON; resolving the result changes nothing."""
     a, b = resolve(BASIC, now=NOW), resolve(BASIC, now=NOW)
     assert a.canonical == b.canonical and a.hash == b.hash
     again = resolve(_write(tmp_path, "r.json", a.pretty()))
@@ -273,7 +273,7 @@ def test_levels_cal_is_t_sys_invariant(tmp_path: Path) -> None:
     p1000 = _resolve_doc(d2, tmp_path).scenario.sources[0].emitters[0].lvl.p_tx_dbw
     assert p500 is not None and p1000 is not None
     assert p1000 - p500 == pytest.approx(10 * math.log10(t_sys_k(1000, 1.465) / t_sys_k(500, 1.465)))
-    assert p500 == pytest.approx(-2.227, abs=0.001)  # M1: METEOR-M2 3 at T_ant 500 K
+    assert p500 == pytest.approx(-2.227, abs=0.001)  # the calibration: METEOR-M2 3 at T_ant 500 K
     d["sources"][0]["level"] = {"cal": "nope"}
     with pytest.raises(ConfigError, match="unknown calibration"):
         _resolve_doc(d, tmp_path)

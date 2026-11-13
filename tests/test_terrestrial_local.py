@@ -1,10 +1,11 @@
-"""M7 local checks (need samples/: the element snapshots of scenarios/terrestrial_hour.yaml).
+"""Local checks of the terrestrial environment (need samples/: the element snapshots of
+scenarios/terrestrial_hour.yaml).
 
 Closed loop on VDL: render two minutes of the recording's hour (scenarios/terrestrial_hour.yaml, 16:50 UTC) and run
-the same P14 measurement on ASSIST's own uint8 stream that produced profiles/vhf137/terrestrial.json from the
-recording. The fixed stations come back at their measured levels, the strong ones clip as much as in the recording
-(above the recording's background rail fraction, which M8 models), and the aircraft bursts have the recording's
-rate and level spread.
+the same `assist profile terrestrial` measurement on ASSIST's own uint8 stream that produced
+profiles/vhf137/terrestrial.json from the recording. The fixed stations come back at their measured levels, the strong
+ones clip as much as in the recording (above the recording's background rail fraction), and the aircraft bursts have
+the recording's rate and level spread.
 """
 
 import json

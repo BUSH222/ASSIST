@@ -1,4 +1,4 @@
-"""Profile models and statistics: QFH/link budget (plan §6.2), ADC, noise, birdies, occupancy, ORBCOMM, labels."""
+"""Profile models and statistics: QFH/link budget, ADC, noise, birdies, occupancy, ORBCOMM, labels."""
 
 from typing import TYPE_CHECKING
 
@@ -27,7 +27,7 @@ def test_qfh_clamped_outside_domain() -> None:
 
 
 def test_link_budget_geometry_matches_plan() -> None:
-    """820 km orbit: off-nadir 62.4 deg at the horizon; zenith vs horizon ~ -21.8 dB in total (plan §6.2)."""
+    """820 km orbit: off-nadir 62.4 deg at the horizon; zenith vs horizon ~ -21.8 dB in total."""
     h, re = 820e3, meteor_cal.R_EARTH
     r_horizon = np.sqrt((re + h) ** 2 - re**2)
     assert meteor_cal.off_nadir_deg(np.array([0.0]), np.array([r_horizon]), 0.0)[0] == pytest.approx(62.4, abs=0.2)
@@ -132,7 +132,7 @@ def _rrc(alpha: float, sps: int, span: int) -> np.ndarray:
 
 
 def test_orbcomm_carrier_symbol_rate_and_alpha() -> None:
-    """Synthetic +-90 deg DPSK (plan §5 sdpsk model), 5000 sym/s at 50 kS/s, carrier +350 Hz, alpha 0.4."""
+    """Synthetic +-90 deg DPSK (the `sdpsk` model), 5000 sym/s at 50 kS/s, carrier +350 Hz, alpha 0.4."""
     rng = np.random.default_rng(5)
     rs, sps, n_sym = 5000, 10, 5000 * 8
     p = (np.arange(n_sym) % 2) + 2 * rng.integers(0, 2, n_sym)

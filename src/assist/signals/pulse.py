@@ -1,4 +1,4 @@
-"""Shared parts of the pulse-shaped signals (`oqpsk`, `oqpsk_burst`, `sdpsk`, plan §5).
+"""Shared parts of the pulse-shaped signals (`oqpsk`, `oqpsk_burst`, `sdpsk`).
 
 Symbols sit on an absolute grid: symbol k is at Unix time k / rs (rs is an integer number of symbols per second),
 and narrow sample n at n / rate with rate = sps * rs. The root-raised-cosine filter has span * sps + 1 taps and is

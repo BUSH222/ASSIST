@@ -1,4 +1,4 @@
-"""Carrier model (plan §6.3).
+"""Carrier model.
 
 f_tx(t) = f_nominal + offset_hz + pass_offset(p) + drift(p) * (t - t_aos(p))
 

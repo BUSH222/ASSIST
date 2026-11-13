@@ -1,4 +1,4 @@
-"""Wideband synthesis by overlap-add in the frequency domain (plan §4.2); the kernel is `dsp.synth`.
+"""Wideband synthesis by overlap-add in the frequency domain; the kernel is `dsp.synth`.
 
 Hop N = fs / 100 (10 ms), FFT size M = 2N, bin spacing fs / M = 50 Hz. Block b covers the absolute wideband samples
 [bN, bN + 2N). An emitter at narrow rate r has L = r M / fs samples per block (even, since r is a multiple of 100):

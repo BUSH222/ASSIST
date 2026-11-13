@@ -1,4 +1,4 @@
-"""The external raw TCP sink `tcp` (PLAN.md R3): formats, the shared server, and `assist run` end to end."""
+"""The external raw TCP sink `tcp`: formats, the shared server, and `assist run` end to end."""
 
 import asyncio
 import json

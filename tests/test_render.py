@@ -1,4 +1,4 @@
-"""Render engine (plan §10.1): T-DOP (IQ), T-LVL, T-WIN, T-DET (render), T-KEY (signal), zombie keying, noise.
+"""Render engine: Doppler and level in the IQ, window independence, determinism, keyed draws, zombie keying, noise.
 
 CI renders short windows spread across a pass (random access makes that equivalent to slicing a full render); a
 full-pass check of a real render is in test_render_local.py. Scenarios use the rounded station position and the
@@ -106,7 +106,7 @@ def _freq_errors(scene: Scene, sid: str, starts: list[float], dur: float = 0.2) 
 
 
 def test_doppler_from_iq_over_a_pass(cw: Scene) -> None:
-    """T-DOP (IQ): instantaneous frequency of the rendered CW vs truth f_rx, <= 0.1 Hz RMS across the pass."""
+    """Doppler in the IQ: instantaneous frequency of the rendered CW vs truth f_rx, <= 0.1 Hz RMS across the pass."""
     p = _pass(cw, "c1")
     starts = [*np.linspace(p.aos + 0.5, p.los - 1.0, 12), p.tca - 0.1]
     err = _freq_errors(cw, "c1", starts)
@@ -160,7 +160,7 @@ def test_signal_level_chain_is_exact(levels: Scene) -> None:
 
 
 def test_levels_from_iq(levels: Scene) -> None:
-    """T-LVL: C/N0 measured from the uint8 stream (noise and ADC on) vs truth, within 0.3 dB.
+    """Level: C/N0 measured from the uint8 stream (noise and ADC on) vs truth, within 0.3 dB.
 
     Carriers at three points of the noise shape, early in the pass (~41 dB-Hz) and at culmination (~57 dB-Hz);
     2 s windows keep the measurement's own scatter near 0.1 dB. The receiver response applies to signals and noise
@@ -227,7 +227,8 @@ def test_fades_after_aos_and_before_los(cw: Scene, tmp: Path) -> None:
 
 
 def test_render_window_independence(zombie: Scene, tmp: Path) -> None:
-    """T-WIN and T-DET: a window rendered on its own equals the slice of a longer render, byte for byte.
+    """Window independence and determinism: a window rendered on its own equals the slice of a longer render, byte for
+    byte.
 
     The windows cross a 1 s control chunk and an on/off edge, and the inner window starts off the hop grid.
     """
@@ -246,7 +247,7 @@ def test_render_window_independence(zombie: Scene, tmp: Path) -> None:
 
 
 def test_adding_a_source_changes_no_other_signal(tmp: Path) -> None:
-    """T-KEY (signal): another source changes neither the first source's narrow samples nor, while it is silent, the
+    """Keyed draws: another source changes neither the first source's narrow samples nor, while it is silent, the
     output bytes."""
     a = _scene(tmp, [_zombie()], "key_a")
     later = dict(PASS, aos="+40min")
@@ -333,7 +334,7 @@ def test_narrow_rate_and_bin(cw: Scene) -> None:
 def test_ppm_must_be_zero(tmp: Path) -> None:
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="only 0 is supported until M7"):
+    with pytest.raises(ValidationError, match="only 0 is supported"):
         _scene(tmp, [], "ppm", frontend={"ppm": 1.5})
 
 
@@ -346,7 +347,7 @@ def test_unknown_signal_kinds_are_refused(tmp: Path) -> None:
 
 def test_cpp_and_numpy_engines_agree(zombie: Scene) -> None:
     """The same render through the C++ kernels and their numpy twins: the noise draw is the same bits, the rest
-    agrees to float rounding, so bytes differ by at most one count, and rarely (plan §2)."""
+    agrees to float rounding, so bytes differ by at most one count, and rarely."""
     from assist import _dsp, dsp_ref
 
     sch = zombie.source("z1").emitters[0].schedule

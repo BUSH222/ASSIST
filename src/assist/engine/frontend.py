@@ -1,11 +1,11 @@
-"""Receiver front end, M3 part (plan §4.3, §4.4): profile-shaped noise, the receiver response and the ADC.
+"""Receiver front end: profile-shaped noise, the receiver response and the ADC.
 
 - **Noise shape.** The profile's noise PSD (`noise_psd.npy`: 16 384 fftshifted bins, dB, 0 dB = passband median) is
   turned into a 513-tap FIR by frequency sampling: the inverse FFT of the amplitude 10^(dB/20) with zero phase,
   truncated to the central 513 taps. The taps are Hermitian, so the response is real (zero phase). Without a profile
   the shape is flat (a single tap).
 - **Noise.** White complex Gaussian at fs from a counter-based generator (`dsp.white`: Philox4x32-10 keyed by
-  KeyedRng.key64("noise"), counter = absolute hop index, then Box-Muller; plan §3.2), filtered by overlap-save
+  KeyedRng.key64("noise"), counter = absolute hop index, then Box-Muller), filtered by overlap-save
   (`dsp.noise`) in segments of a third of a hop. Hop h uses its own draw plus the last 512 samples of hop h-1's draw,
   so any hop can be computed on its own. The PSD's 0 dB level is k T_sys: noise and signals are both referred to the
   antenna terminals in sqrt(mW).

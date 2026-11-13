@@ -1,4 +1,4 @@
-"""Truth (plan §8): T-DET across machines (golden file), T-KEY, consistency; catalog; CLI commands.
+"""Truth: the same text across machines (golden file), independence of sources, consistency; catalog; CLI commands.
 
 The golden truth was written on the dev Mac (`ASSIST_UPDATE_GOLDEN=1 uv run pytest tests/test_truth.py`); CI on
 ubuntu must reproduce it byte for byte.
@@ -48,7 +48,7 @@ def _csv(rows: list[dict[str, str]], cols: tuple[str, ...]) -> str:
 
 
 def test_truth_matches_golden(scene: Scene) -> None:
-    """T-DET (truth): the same text on every machine (frequencies to 1 mHz, angles 1e-6 deg, range 1 mm)."""
+    """Determinism of truth: the same text on every machine (frequencies to 1 mHz, angles 1e-6 deg, range 1 mm)."""
     table = T.compute(scene, scene.t_start, scene.t_end, 10.0)
     text, events = _csv(table.rows, T.COLUMNS), _csv(table.events, T.EVENT_COLUMNS)
     if os.environ.get("ASSIST_UPDATE_GOLDEN"):
@@ -90,7 +90,7 @@ def test_zombie_truth_follows_the_carrier_model(scene: Scene) -> None:
 
 
 def test_adding_a_source_changes_nothing_else(tmp_path: Path) -> None:
-    """T-KEY: another source leaves every other source's resolved config and truth unchanged."""
+    """Keyed draws: another source leaves every other source's resolved config and truth unchanged."""
     doc = loader.load_scenario(BASIC)
     extra = loader.load_scenario(BASIC)
     extra["sources"].insert(

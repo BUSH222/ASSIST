@@ -1,4 +1,4 @@
-"""P2: ADC statistics of a cu8 recording.
+"""ADC statistics of a cu8 recording.
 
 Per second of samples: a 256-bin histogram of I and of Q, and the I/Q covariance. From these: DC (mean counts
 relative to 127.5), RMS, a robust noise sigma (1.4826 * MAD, insensitive to strong bursts), and clipping. The

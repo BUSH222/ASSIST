@@ -1,4 +1,4 @@
-"""KeyedRng (plan §3.2) and the time base (§3.1)."""
+"""KeyedRng and the time base."""
 
 import datetime as dt
 

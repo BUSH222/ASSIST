@@ -1,4 +1,4 @@
-"""Chunk-parallel rendering (plan §4.5) and `bench`: worker processes give the same bytes as one process.
+"""Chunk-parallel rendering and `bench`: worker processes give the same bytes as one process.
 
 The pool spawns fresh interpreters (a few seconds each in CI), so the windows are short and tasks are 1 s.
 """
@@ -92,7 +92,7 @@ def test_render_workers_cli(scenario: Path, tmp_path: Path) -> None:
         )
         assert res.exit_code == 0, res.output
         run = json.loads((out / "run.json").read_text())
-        assert run["status"] == "complete" and run["workers"] == nw and run["engine"].endswith("(M7)")
+        assert run["status"] == "complete" and run["workers"] == nw and run["engine"].startswith("c++")
         (f,) = out.glob("*.cu8")
         files[nw] = f.read_bytes()
     assert len(files[1]) == 2 * 9 * FS

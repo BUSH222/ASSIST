@@ -1,4 +1,4 @@
-"""`assist catalog` (plan §6.1, §8): the element sets ADRIFT is given.
+"""`assist catalog`: the element sets ADRIFT is given.
 
 By default the whole element store (every object in `elements.files`, the set nearest the clock start), with the
 scenario applied: leave-one-out sources (`in_catalog: false`) are removed, catalog sources keep their published set

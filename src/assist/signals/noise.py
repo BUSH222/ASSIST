@@ -1,4 +1,4 @@
-"""Noise-like signals (plan §5, M7): `noise_band` and `noise_comb`.
+"""Noise-like signals: `noise_band` and `noise_comb`.
 
 `noise_band` (continuous): complex Gaussian noise with a Gaussian spectrum of full width at half maximum `width_hz`,
 unit power. White noise at the narrow rate is keyed per absolute block of rate / 10 samples (`white` with key

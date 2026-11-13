@@ -1,4 +1,4 @@
-"""Time base (plan §3.1): absolute Unix seconds (UTC) address all content.
+"""Time base: absolute Unix seconds (UTC) address all content.
 
 Conversions to Skyfield time, ISO 8601 strings and durations. No network access: Skyfield's built-in leap-second
 and delta-T tables are used.
@@ -90,7 +90,7 @@ def parse_tz(tz: str) -> dt.tzinfo:
     return dt.timezone(sign * dt.timedelta(hours=int(m.group(2)), minutes=int(m.group(3))))
 
 
-# --- the stream's sample grid (plan §3.1) ---
+# --- the stream's sample grid ---
 # Wideband sample n (an integer counted from the Unix epoch) is at n / fs. In 2026 n is about 4.3e15 at 2.4 MS/s, below
 # 2^53, so it is exact as an integer and as a float64. Float Unix times resolve only ~0.24 us, so sample positions are
 # always integers, and float times are derived from them, never the other way round.

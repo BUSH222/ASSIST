@@ -1,4 +1,4 @@
-"""Ground and local platforms (plan §3.4): transmitters without geometry.
+"""Ground and local platforms: transmitters without geometry.
 
 - `ground`: a terrestrial transmitter (VDL ground station, airband AM, the 138 MHz carrier, and aircraft VDL bursts,
   which get a random frequency offset and level per burst instead of a flight geometry).

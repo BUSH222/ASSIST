@@ -1,4 +1,4 @@
-"""What an external module imports (PLAN.md). Everything a plugin needs comes from here; other `assist` modules are
+"""What an external module imports. Everything a plugin needs comes from here; other `assist` modules are
 internal and may change.
 
     from assist import api

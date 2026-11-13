@@ -1,4 +1,4 @@
-"""P8: noise humps ("USB humps") and wandering lines.
+"""Noise humps ("USB humps") and wandering lines.
 
 Rows minus the hour's baseline spectrum, known narrow signals masked, smoothed over 10 rows x 51 bins and
 reduced to 10-row steps x 8-bin columns (1.17 kHz).

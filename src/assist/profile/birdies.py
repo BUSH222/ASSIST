@@ -1,4 +1,4 @@
-"""P6: birdies (persistent narrow lines).
+"""Birdies (persistent narrow lines).
 
 A bin is a birdie if it exceeds the median of its neighbours (5..40 bins away on each side) by more than
 `threshold_db` in more than `min_fraction` of the per-minute mean spectra. Per-minute means (60 rows) are used
@@ -28,7 +28,7 @@ def find_birdies(
     exc = local_excess(minute_mean_db)
     frac = (exc > threshold_db).mean(axis=0)
     hit = frac > min_fraction
-    hit[CENTRE - 3 : CENTRE + 4] = False  # DC is described separately (P3)
+    hit[CENTRE - 3 : CENTRE + 4] = False  # DC is described separately
     out: list[dict[str, float]] = []
     d = np.diff(np.concatenate([[0], hit.astype(np.int8), [0]]))
     for s, e in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1), strict=True):

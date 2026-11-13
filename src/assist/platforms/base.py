@@ -1,4 +1,4 @@
-"""Platform interface (plan §3.4, PLAN.md R2): where an emitter is and how it moves.
+"""Platform interface: where an emitter is and how it moves.
 
 A platform is a class registered under a name with `@register_platform("name")`; a source picks one with
 `platform: name`. The core ones are `satellite` (an orbit and the link budget), `ground` and `local` (no geometry,

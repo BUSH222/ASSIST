@@ -24,7 +24,7 @@ def synth(
     h_rx: ArrayLike | None = None,
     out: np.ndarray | None = None,
 ) -> NDArray[np.complex64]:
-    """Overlap-add synthesis of blocks b0 .. b0 + nb - 1 into (nb + 1) * m / 2 samples (plan §4.2)."""
+    """Overlap-add synthesis of blocks b0 .. b0 + nb - 1 into (nb + 1) * m / 2 samples."""
 
 def white(key: int, h0: int, nhops: int, hop: int) -> NDArray[np.complex64]:
     """Complex white Gaussian noise (unit variance per component) of hops h0 .. h0 + nhops - 1."""
@@ -39,7 +39,7 @@ def noise(
     n_hist: int,
     out: np.ndarray | None = None,
 ) -> NDArray[np.complex64]:
-    """Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save in segments of `sub` samples (plan §4.3)."""
+    """Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save in segments of `sub` samples."""
 
 def adc(x: ArrayLike, gain: float, add: ArrayLike | None = None, out: np.ndarray | None = None) -> NDArray[np.uint8]:
     """Interleaved uint8 I, Q: clip(rint(127.5 + gain * (x + add)), 0, 255)."""

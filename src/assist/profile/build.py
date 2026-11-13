@@ -1,4 +1,4 @@
-"""`assist profile build`: runs P1-P12 and writes profiles/vhf137/ (plan §9).
+"""`assist profile build`: runs every survey step and writes profiles/vhf137/.
 
 Outputs in `out_dir` (committed, except bank/): profile.json, noise_psd.npy, noise_hourly.npy, birdies.json,
 orbcomm_ref.json, meteor_cal.json, bank/. Intermediates and the event list for labelling go to `work_dir`
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 FC = 137.0e6
 METEORS = {57166: "METEOR-M2 3", 59051: "METEOR-M2 4"}
-LORA_CHANNELS_HZ = ((137.036e6, 137.162e6), (137.863e6, 137.990e6))  # SpaceBEE (plan §0); label guess only
+LORA_CHANNELS_HZ = ((137.036e6, 137.162e6), (137.863e6, 137.990e6))  # SpaceBEE; label guess only
 
 
 def _utc(t: float) -> str:
@@ -122,8 +122,7 @@ def build(
         "annotations": [a.as_dict() for a in ann],
     }
 
-    # P1 / P4 / P5
-    log("P1: recording and waterfall timing")
+    log("recording and waterfall timing")
     i = rec.info
     prof["recording"] = {
         "start_utc": _utc(rec.start_unix),
@@ -144,8 +143,7 @@ def build(
         for r in raws
     ]
 
-    # P2
-    log("P2: ADC statistics")
+    log("ADC statistics")
     f_adc = cache / f"adc_{wav.stem}_{wav.stat().st_size}.npz"
     if f_adc.exists():
         stats = dict(np.load(f_adc))
@@ -165,8 +163,7 @@ def build(
     wav_shape = np.median(rows[keep_n], axis=0)
     days = [day_summary(r, cache) for r in raws]
 
-    # P6
-    log("P6: birdies")
+    log("birdies")
     per_day = [birdies.find_birdies(d["minute_mean_db"], f) for d in days]
     vdl_bins = (fm > 136.9) & (fm < 136.95)
     bl = [b for b in _merge_birdies(per_day) if not vdl_bins[np.argmin(np.abs(f - b["freq_hz"]))]]
@@ -176,8 +173,7 @@ def build(
     )
     prof["birdies"] = {"count": len(bl), "file": "birdies.json", "recording_rows_1db": [b["freq_hz"] for b in bw]}
 
-    # P3
-    log("P3: noise PSD, DC, diurnal curve, regimes")
+    log("noise PSD, DC, diurnal curve, regimes")
     shapes = [noise.day_shape(d["minute_mean_db"]) for d in days]
     raw_shape, clipped = noise.combined_shape(shapes, wav_shape, fm)
     bmask = np.zeros(len(f), bool)
@@ -221,8 +217,7 @@ def build(
         "regimes_per_day": regimes,
     }
 
-    # P9
-    log("P9: image / mirror tests")
+    log("image / mirror tests")
     srcs = [(136.925e6, 12e3), (136.975e6, 10e3), (137.9e6, 55e3)]
     img = {}
     for name, spec in [
@@ -246,8 +241,7 @@ def build(
         "carrier138_vs_mirror_recording": coh138,
     }
 
-    # P7
-    log("P7: occupancy")
+    log("occupancy")
     chans = occupancy.default_channels()
     bird_f = np.array([b["freq_hz"] for b in bl])
     occ_days = []
@@ -373,12 +367,11 @@ def build(
         },
     }
 
-    # P9 continued: 138 MHz events vs their mirror (135.8-136.0 MHz)
+    # mirror tests continued: 138 MHz events vs their mirror (135.8-136.0 MHz)
     if b138 is not None:
         prof["mirror"]["band138_events_vs_mirror"] = _band138_mirror(occ_days, chans, f)
 
-    # P8
-    log("P8: humps and wandering lines")
+    log("humps and wandering lines")
     step_s = humps.STEP_ROWS * wf.ROW_SECONDS
     fcol = f.reshape(-1, humps.COL_BINS).mean(axis=1) / 1e6
     h_out = {}
@@ -409,8 +402,7 @@ def build(
     h_out[wav.name] = {"comb": humps.comb_summary(humps.comb_series(wcube, fcol), step_s), "note": "after 445 s"}
     prof["humps"] = h_out
 
-    # P10
-    log("P10: METEOR level calibration")
+    log("METEOR level calibration")
     pds = meteor_cal.collect(raws, els, st, tuple(METEORS))
     use = [p for p in pds if p.p.max_el_deg > 5]
     fits = {METEORS[n]: meteor_cal.fit_c([p for p in use if p.norad == n], st) for n in METEORS}
@@ -462,8 +454,7 @@ def build(
         "p_tx_dbw_at_t_ant_500": mcal["p_tx_dbw_for_t_ant"]["500"]["both"],
     }
 
-    # P2b + P11
-    log("P2b: ORBCOMM reference; P11: bank")
+    log("ORBCOMM reference; sample bank")
     bank = Bank(out_dir / "bank")
     orb = _orbcomm(rec, ann, rows, f, els, st, bank)
     if orb.get("channels"):
@@ -488,8 +479,8 @@ def build(
     bank.write_index()
     prof["bank"] = {"dir": "bank", "clips": len(bank.entries), "committed": False}
 
-    # P12 events: satellite-band activity no known transmitter explains + known passes for reference
-    log("P12: event list")
+    # Event list: satellite-band activity no known transmitter explains + known passes for reference
+    log("event list")
     event_rows += _satband_events(raws, days, occ_days, f, els, st, bl)
     for i_, e in enumerate(sorted(event_rows, key=lambda e: (e["file"], e["row_start"], e["f_lo_hz"]))):
         e["id"] = f"e{i_:06d}"

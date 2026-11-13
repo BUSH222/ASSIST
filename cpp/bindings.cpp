@@ -1,5 +1,5 @@
 // pybind11 module assist._dsp. Type stubs: src/assist/_dsp.pyi; numpy twins: src/assist/dsp_ref/.
-// Every binding checks its arguments, then releases the GIL around the kernel call (plan §2).
+// Every binding checks its arguments, then releases the GIL around the kernel call.
 #include <pybind11/complex.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -277,12 +277,12 @@ PYBIND11_MODULE(_dsp, m) {
     m.def("scale", &scale, py::arg("x"), py::arg("g"), "x * g as complex64 (x: 1-D, cast to complex64).");
     m.def("synth", &synth, py::arg("streams"), py::arg("lens"), py::arg("bins"), py::arg("active"), py::arg("b0"),
           py::arg("nb"), py::arg("m"), py::arg("h_rx") = py::none(), py::arg("out") = py::none(),
-          "Overlap-add synthesis of blocks b0 .. b0 + nb - 1 into (nb + 1) * m / 2 samples (plan §4.2).");
+          "Overlap-add synthesis of blocks b0 .. b0 + nb - 1 into (nb + 1) * m / 2 samples.");
     m.def("white", &white, py::arg("key"), py::arg("h0"), py::arg("nhops"), py::arg("hop"),
           "Complex white Gaussian noise (unit variance per component) of hops h0 .. h0 + nhops - 1.");
     m.def("noise", &noise, py::arg("key"), py::arg("h0"), py::arg("nhops"), py::arg("hop"), py::arg("sub"),
           py::arg("taps_f"),
-          py::arg("n_hist"), py::arg("out") = py::none(), "Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save (plan §4.3).");
+          py::arg("n_hist"), py::arg("out") = py::none(), "Shaped noise of hops h0 .. h0 + nhops - 1 by overlap-save.");
     m.def("adc", &adc, py::arg("x"), py::arg("gain"), py::arg("add") = py::none(), py::arg("out") = py::none(),
           "Interleaved uint8 I, Q: clip(rint(127.5 + gain * (x + add)), 0, 255).");
     m.def("random_bytes", &random_bytes, py::arg("key"), py::arg("block"), py::arg("n"),

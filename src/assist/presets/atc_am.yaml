@@ -1,4 +1,4 @@
-# Airband AM voice on one channel (plan §6.5, M7): push-to-talk transmissions (DSB with full carrier, cheap synthetic
+# Airband AM voice on one channel: push-to-talk transmissions (DSB with full carrier, cheap synthetic
 # speech, 20 ms PTT ramps), Poisson-timed, lognormal durations; each transmission its own small carrier offset and
 # level (controller and aircraft alike). The level is the carrier's. Give `freq_hz`, the level and the rate.
 platform: ground

@@ -1,4 +1,4 @@
-"""T-OLA (plan §10.1): single signals through the overlap-add synthesiser (`synth` kernel, C++ and numpy twin).
+"""Single signals through the overlap-add synthesiser (`synth` kernel, C++ and numpy twin).
 
 The synthesiser is driven directly: an emitter at narrow rate r and coarse bin k gets its narrow samples
 [bL/2, bL/2 + L) per block b (the kernel applies the Hann window), and the output hops are compared with the same
@@ -6,9 +6,9 @@ signal computed directly at fs. Block indices are absolute (around 1.8e11 in 202
 exercised.
 
 - CW at several bins (odd and even) and offsets from the bin;
-- QPSK at 72 ksym/s with an RRC pulse (alpha 0.6) at 4 samples per symbol, the M3 stand-in: the narrow samples and
+- QPSK at 72 ksym/s with an RRC pulse (alpha 0.6) at 4 samples per symbol, a stand-in: the narrow samples and
   the wideband reference come from the same continuous-time waveform;
-- the M6 `oqpsk` signal (METEOR LRPT) itself: the reference is its narrow samples interpolated to fs (band-limited,
+- the `oqpsk` signal (METEOR LRPT) itself: the reference is its narrow samples interpolated to fs (band-limited,
   by FFT over a long stretch around the hops checked).
 
 Checks: error and spurious lines <= -60 dBc, CW amplitude flat within 0.01 dB, no phase jump at hop edges.
@@ -132,7 +132,7 @@ class _Qpsk:
 
 @BACKENDS
 def test_ola_qpsk(dsp) -> None:
-    """QPSK (stand-in for oqpsk until M6), offset 3 kHz from an odd bin: error <= -60 dBc against the direct signal."""
+    """QPSK (a stand-in for oqpsk), offset 3 kHz from an odd bin: error <= -60 dBc against the direct signal."""
     hops = 12
     h0 = B0 + 7
     k_bin, delta = 7001, 3000

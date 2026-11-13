@@ -1,4 +1,4 @@
-"""Interpreter and dependency checks from plan §2 (Python 3.15 checks)."""
+"""Interpreter and dependency checks (Python 3.15)."""
 
 import importlib
 import sys

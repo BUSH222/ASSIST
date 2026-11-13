@@ -1,4 +1,4 @@
-"""`lora` (plan §5): SpaceBEE-style LoRa bursts, BW 125 kHz, an event signal.
+"""`lora`: SpaceBEE-style LoRa bursts, BW 125 kHz, an event signal.
 
 Per burst (drawn from the schedule's keyed slot stream): spreading factor `sf` and payload length
 `payload_bytes`, each a number or an inclusive [lo, hi] range. A burst is `preamble` up-chirps (value 0), two sync

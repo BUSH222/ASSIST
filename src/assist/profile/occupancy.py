@@ -1,4 +1,4 @@
-"""P7: channel occupancy.
+"""Channel occupancy.
 
 Waterfall days (1 s rows): per row, excess over an hourly baseline spectrum (median of the hour's per-minute means);
 a channel's excess is the max over its bins. On/off with hysteresis (on above `on_db`, off below `off_db`) gives

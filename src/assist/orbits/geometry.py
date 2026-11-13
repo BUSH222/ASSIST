@@ -1,7 +1,7 @@
-"""Satellite geometry seen from the station (plan §4.1, §6.1).
+"""Satellite geometry seen from the station.
 
 Two layers:
-- Direct Skyfield evaluation (`topocentric`, `geometry`, `find_passes`): what the M1 profile tool used, unchanged.
+- Direct Skyfield evaluation (`topocentric`, `geometry`, `find_passes`): what the profile tool uses.
 - `SplineGeometry` for the simulator: Skyfield sampled at whole Unix seconds over aligned one-hour blocks (plus
   2 min each side), turned into cubic splines. Range rate is the derivative of the range spline. Because the sample
   grid never depends on the requested window, any window gives the same values (random access). Passes come from
@@ -91,7 +91,7 @@ def geometry(row: Mapping[str, Any], station: Station, t_unix: np.ndarray) -> Ge
     return topocentric(satellite_from_omm(row), station, t_unix)
 
 
-# --- profile tool: passes by Skyfield's find_events, clipped to the window (M1 behaviour) ---
+# --- profile tool: passes by Skyfield's find_events, clipped to the window ---
 
 
 def find_passes(row: Mapping[str, Any], station: Station, t0: float, t1: float, min_el_deg: float = 0.0) -> list[Pass]:
@@ -174,7 +174,7 @@ class _Block:
 
 
 class SplineGeometry:
-    """Spline-sampled geometry of one satellite from one station, with passes (plan §4.1)."""
+    """Spline-sampled geometry of one satellite from one station, with passes."""
 
     def __init__(
         self,

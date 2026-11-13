@@ -1,1 +1,1 @@
-"""Data survey and profile extractor (plan §9): distils the station's recordings into profiles/vhf137/."""
+"""Data survey and profile extractor: distils the station's recordings into profiles/vhf137/."""

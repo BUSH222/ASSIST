@@ -1,4 +1,4 @@
-"""Serving the uint8 IQ stream over TCP: the parts every serving sink shares (PLAN.md R3).
+"""Serving the uint8 IQ stream over TCP: the parts every serving sink shares.
 
 - **Render-ahead (`RenderAhead`):** one thread renders the stream into a ring of about `lookahead` seconds, in chunks
   of 16 384 samples. The stream starts once the ring is full (pre-roll).

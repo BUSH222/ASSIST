@@ -1,4 +1,4 @@
-"""External modules (PLAN.md): a scenario lists the plugins it uses under `plugins:`, and only those are loaded.
+"""External modules: a scenario lists the plugins it uses under `plugins:`, and only those are loaded.
 
     plugins:
       - psk8                              # an entry point of the group `assist.plugins`, else an importable module

@@ -1,4 +1,4 @@
-"""Scenario loading (plan §3.3): YAML/JSON -> includes -> `--set` -> band defaults -> presets.
+"""Scenario loading: YAML/JSON -> includes -> `--set` -> band defaults -> presets.
 
 Random expressions are drawn afterwards (`randexpr`) and the result is validated (`schema`).
 

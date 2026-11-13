@@ -1,4 +1,4 @@
-"""Waterfall .raw loader (plan §9, P4/P5).
+"""Waterfall .raw loader.
 
 A .raw file is the capture script's byte rows: n_rows x FFT_SIZE uint8, no header. Its name holds the Unix time
 taken just before connecting (`waterfall_<int(time.time())>.raw`), so row times carry up to ~1 s of offset from
@@ -29,7 +29,7 @@ class RawWaterfall:
         return int(self.pixels.shape[0])
 
     def row_time(self, i: int | np.ndarray) -> float | np.ndarray:
-        """Unix time of the middle of row i: t_file + CAL/fs + (i + 0.5) * ROW/fs (P5)."""
+        """Unix time of the middle of row i: t_file + CAL/fs + (i + 0.5) * ROW/fs."""
         return self.t_file + CAL_SAMPLES / self.fs + (np.asarray(i, dtype=np.float64) + 0.5) * ROW_SAMPLES / self.fs
 
     def row_at(self, t_unix: float) -> int:
@@ -37,7 +37,7 @@ class RawWaterfall:
         return int(np.floor((t_unix - self.t_file - CAL_SAMPLES / self.fs) * self.fs / ROW_SAMPLES))
 
     def db(self, i0: int, i1: int, centre: bool = False) -> np.ndarray:
-        """Rows [i0, i1) in dB relative to the file's calibration mean (P4), float32."""
+        """Rows [i0, i1) in dB relative to the file's calibration mean, float32."""
         return pixel_to_db(self.pixels[i0:i1], centre=centre)
 
     def freqs(self, fc_hz: float = 137.0e6) -> np.ndarray:

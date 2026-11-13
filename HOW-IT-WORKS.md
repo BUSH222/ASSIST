@@ -3,6 +3,8 @@
 This is the internal reference for ASSIST (**A**utonomous **S**atellite **S**ignal **I**mitator **S**tation). The
 [README](README.md) tells you *how to use* it. This document tells you *how it is built*: what every module does, what a
 number looks like at each step on its way from a line of YAML to a byte on a TCP socket, and why it is built that way.
+[PLUGINS.md](PLUGINS.md) is the guide for writing a signal, a platform or a sink of your own; section 18 here explains
+the machinery behind it.
 
 It follows the code as it is today (branch `dev`, version 0.1.0). File and function names are given so you can jump
 straight to the source. Numbers quoted as "measured" come from running the code on the bundled `profiles/vhf137`
@@ -27,7 +29,7 @@ profile and a scenario with the rounded fallback station (55.5 N, 37.1 E, 172 m)
 15. [Tests and CI](#15-tests-and-ci)
 16. [A worked example, end to end](#16-a-worked-example-end-to-end)
 17. [Limits, caveats and known discrepancies](#17-limits-caveats-and-known-discrepancies)
-18. [Extending ASSIST](#18-extending-assist)
+18. [Extension points: registries, plugins and the public API](#18-extension-points-registries-plugins-and-the-public-api)
 19. [Glossary of symbols and units](#19-glossary-of-symbols-and-units)
 
 ---
@@ -61,6 +63,7 @@ flowchart LR
         PRE["presets/*.yaml"]
         EL["elements/*.csv<br/>(OMM element sets)"]
         PROF["profiles/vhf137<br/>(measured noise, calibrations)"]
+        PLUG["plugins<br/>(external modules the scenario lists)"]
     end
 
     subgraph CFG["config/ - becomes a document"]
@@ -89,6 +92,7 @@ flowchart LR
         S1["files: wav / rf64 / cu8"]
         S2["rtl_tcp server"]
         S3["fft waterfall PNG"]
+        S4["sinks from plugins"]
     end
 
     Y --> LOAD
@@ -96,6 +100,7 @@ flowchart LR
     SET --> LOAD
     BAND --> LOAD
     PRE --> LOAD
+    PLUG -->|loaded before validation| VAL
     LOAD --> DRAW --> VAL --> RES
     EL --> RES
     PROF --> RES
@@ -107,12 +112,16 @@ flowchart LR
     REN --> S1
     REN --> S2
     REN --> S3
+    REN --> S4
 ```
 
 Read it left to right: a text file becomes a *document* (dicts), the document is validated into typed models, the
 models are *resolved* into a frozen, self-contained, hashable scenario, and that scenario is turned into live objects
 (the *scene*). The scene feeds two independent consumers: the **truth** code (cheap, analytic) and the **renderer**
-(expensive, produces samples).
+(expensive, produces samples). The renderer's bytes go to *sinks*, driven by one command, `assist run`.
+
+Signal kinds, platforms and sinks are looked up by name in three registries. The ones shipped with ASSIST and the
+ones a scenario brings along as plugins are registered the same way ([section 18](#18-extension-points-registries-plugins-and-the-public-api)).
 
 ### The signal chain in one picture
 
@@ -163,12 +172,13 @@ moved to its place in the 2.4 MHz band by *placing its spectrum into a big FFT*.
 | **Profile** | `profiles/vhf137/`: measured data from the real station (noise shape, ADC sigma, METEOR/ORBCOMM calibrations, terrestrial statistics). |
 | **Preset** | A ready-made source in `src/assist/presets/` (`zombie`, `meteor_lrpt`, `orbcomm`, ...). |
 | **Source** | One transmitting object (satellite, ground station, group of receiver spurs). Has a platform and one or more emitters. |
-| **Platform** | Where a source is. `satellite` (orbit, Doppler, passes), `ground` (fixed received level, no geometry), `local` (inside the receiver). |
+| **Platform** | Where a source is. `satellite` (orbit, Doppler, passes), `ground` (fixed received level, no geometry), `local` (inside the receiver), or one from a plugin. |
+| **Capability** | A class attribute of a platform (`fixed`, `needs_orbit`, `level_mode`, ...) that says what a source on it may have. The code asks for capabilities, never for platform names. |
 | **Emitter** | One transmitted signal of a source: a signal kind, a frequency, a schedule, a level, an antenna pattern. |
 | **Signal** | The modulation (`cw`, `oqpsk`, `lora`, ...). Produces unit-power complex samples at a low rate. |
 | **Schedule** | When an emitter transmits: `continuous`, `on_off`, `exp_gaps`, `poisson_events`. |
 | **Event** | One burst of an event schedule (a LoRa packet, a VDL burst, a push-to-talk). |
-| **Level** | How strong: `cn0_zenith_dbhz`, `cal`, `p_tx_dbw` (satellites) or `cn0_dbhz`, `rx_dbm` (ground/local). |
+| **Level** | How strong: `cn0_zenith_dbhz`, `cal`, `p_tx_dbw` (the link budget: satellites) or `cn0_dbhz`, `rx_dbm` (a received level: every other platform). |
 | **Carrier** | The frequency model of an emitter: rest frequency, per-pass offset and drift. |
 | **fs** | Wideband sample rate, 2 400 000 Hz. |
 | **Hop N** | 10 ms of stream: `N = fs / 100 = 24 000` samples. The synthesis step. |
@@ -180,11 +190,11 @@ moved to its place in the 2.4 MHz band by *placing its spectrum into a big FFT*.
 | **AOS / TCA / LOS** | Acquisition / time of closest approach (culmination) / loss of signal of a pass. |
 | **Pass key** (`aos_key`) | The first whole Unix second at or above the horizon. Seeds the per-pass random draws. |
 | **Truth** | Analytic ground truth (frequency, Doppler, level...) computed without rendering any samples. |
+| **Sink** | Where the uint8 stream goes: `wav`, `cu8`, `fft` (push sinks, fed piece by piece) or `rtl_tcp` (a serving sink, with clients). Listed under `sinks:`, driven by `assist run`. |
+| **Registry** | A table from names to classes (`registry.py`). There are three: signals, platforms, sinks. |
+| **Plugin** | An external Python module a scenario lists under `plugins:`. It registers signals, platforms or sinks through `assist.api`. |
+| **RNG scope** (`RngScope`) | One consumer's share of the scenario's randomness: every key it can form starts with its prefix. |
 | **ADRIFT** | The tracker/classifier ASSIST was built to test (appears in comments). |
-
-**On "M0..M8" and "plan §n".** Code comments refer to milestones (M0 skeleton ... M7 terrestrial environment, M8 partial)
-and to sections of a design plan that lives in `samples/plan.md` (gitignored, local only). This document does not
-depend on them.
 
 ---
 
@@ -209,6 +219,14 @@ where each string in the key is hashed with BLAKE2b (8 bytes) and integers are u
 **adding or removing a source cannot change any other source's draws**. There is a test for exactly that
 (`test_adding_a_source_changes_no_other_signal`).
 
+Consumers do not hold the `KeyedRng` or the seed. Each gets an **`RngScope`**: a key prefix with `stream(*parts)`,
+`key64(*parts)` and `child(*parts)`, which prepend the prefix. An emitter's scope is `(source_id, emitter_id)` (the
+class `Keys`), shared by its carrier, schedule and signal. A platform's is `("platform", platform name, source_id)`, a
+sink's `("sink", sink name)`, and a signal kind from a plugin gets its emitter's keys under `("signal", kind)`. Two
+scopes with different prefixes can never produce the same key, so a module cannot reach another module's draws, and
+adding a plugin changes nobody else's numbers. Key parts are strings or non-negative integers (`key_int` rejects
+anything else).
+
 ### Rule 3 - Streams of bits and noise are counter-based
 
 Anything that must be addressable at an arbitrary index (payload bytes, noise samples) uses **Philox4x32-10**, a counter-based
@@ -228,8 +246,8 @@ far beyond float64's 2^53.
 
 Chunk `c` is computed from the resolved scenario and `c` alone. The one place chunks touch is the 50 % overlap between
 blocks; the engine handles that by recomputing the overlapping half-block on its own when a render starts mid-stream
-(see [9.6](#96-the-overlap-add-synthesiser)). Result: any window is identical to the corresponding slice of a longer one
-(test family **T-WIN**), and worker processes can take any chunk in any order (**T-DET**).
+(see [9.6](#96-the-overlap-add-synthesiser)). Result: any window is identical to the corresponding slice of a longer one,
+and worker processes can take any chunk in any order.
 
 ### Rule 6 - Resolve once, then everything is pure
 
@@ -241,12 +259,12 @@ arrays) or the network. Workers rebuild their own `Renderer` from the canonical 
 
 The hot numeric kernels exist twice: C++ (`cpp/`, pybind11 module `assist._dsp`) and numpy (`src/assist/dsp_ref/`). Integer
 kernels (`white`, `adc`, `random_bytes`, `conv_encode`, `ccsds_randomise`) match **bit for bit**; float kernels agree
-to rounding. `ASSIST_PURE=1` selects numpy. This keeps the C++ honest (**T-REF**) and gives a fallback and a readable specification.
+to rounding. `ASSIST_PURE=1` selects numpy. This keeps the C++ honest (`tests/test_dsp_ref.py`) and gives a fallback and a readable specification.
 
 ### Rule 8 - Fail loudly
 
 Every pydantic model has `extra="forbid"`, so a typo is an error. A frequency that would leave an emitter's narrow
-band raises `RenderError` instead of aliasing silently. Unsupported options (`ppm != 0`, unimplemented signal kinds)
+band raises `RenderError` instead of aliasing silently. Unsupported options (`ppm != 0`) and unknown names (a signal kind, platform or sink that is neither core nor from a listed plugin)
 are refused at validation. Output files are never overwritten without `--force`; element snapshots are never overwritten at all.
 
 ---
@@ -257,6 +275,7 @@ are refused at validation. Output files are never overwritten without `--force`;
 ASSIST/
 ├── README.md                    user documentation
 ├── HOW-IT-WORKS.md              this file
+├── PLUGINS.md                   guide to writing a signal, a platform or a sink
 ├── pyproject.toml               package metadata, ruff/ty/pytest config, scikit-build-core build of the C++ module
 ├── CMakeLists.txt               builds assist._dsp (pybind11 + pocketfft), -O3 -ffp-contract=off
 ├── uv.lock                      pinned dependency set
@@ -274,10 +293,14 @@ ASSIST/
 │   └── third_party/             vendored pocketfft_hdronly.h
 │
 ├── src/assist/
-│   ├── cli.py                   `assist` command (typer): every command lives here
+│   ├── cli.py                   `assist` command (typer): every command except the `profile` group
+│   ├── api.py                   the public interface: everything a plugin imports
+│   ├── registry.py              Registry: names -> classes, for signals, platforms and sinks (core and external)
+│   ├── plugins.py               loads the plugins a scenario lists; API_VERSION; provenance
+│   ├── testing.py               conformance checks for signals, platforms and sinks
 │   ├── backend.py               picks assist._dsp (C++) or assist.dsp_ref (numpy)
 │   ├── _dsp.pyi                 type stubs of the C++ module
-│   ├── rng.py                   KeyedRng (rule 2)
+│   ├── rng.py                   KeyedRng and RngScope (rule 2)
 │   ├── timebase.py              Unix time, ISO parsing, durations, the sample grid (rule 1)
 │   ├── station.py               Station dataclass + station-file reader
 │   ├── truth.py                 `assist truth`: rows and events
@@ -302,14 +325,17 @@ ASSIST/
 │   │   ├── perturb.py           make the true orbit differ from the published one
 │   │   └── catalog.py           `assist catalog`: what the tracker under test is given
 │   │
-│   ├── platforms/               satellite (SplineGeometry) and fixed (ground/local) platforms
+│   ├── platforms/
+│   │   ├── base.py              Platform ABC, capabilities, PlatformContext, register_platform
+│   │   ├── satellite.py         `satellite`: truth orbit, SplineGeometry
+│   │   └── fixed.py             `ground` and `local`: no geometry
 │   ├── emitters/
 │   │   ├── link.py              antenna patterns, FSPL, T_sys, link budget, calibration constants
 │   │   ├── carrier.py           f_tx(t) = rest + pass offset + drift, in integer mHz
 │   │   ├── schedules.py         continuous / on_off / exp_gaps / poisson_events, AM tumble model
 │   │   └── emitter.py           Emitter dataclass: level(), truth(), event_truth()
 │   │
-│   ├── signals/                 one class per modulation, all behind the Signal ABC (base.py)
+│   ├── signals/                 one class per modulation, all behind the Signal ABC (base.py: Signal, Keys, register_signal)
 │   │   └── cw, oqpsk, oqpsk_burst, sdpsk, lora, d8psk, gfsk, am, noise (noise_band, noise_comb), pulse (shared RRC)
 │   │
 │   ├── engine/                  scene -> bytes
@@ -323,18 +349,24 @@ ASSIST/
 │   │   └── bench.py             `assist bench`
 │   │
 │   ├── sinks/
-│   │   ├── wavfile.py           WAV / RF64 / cu8 writers, SDR++ file names
-│   │   ├── fft.py               waterfall PNG sink
-│   │   ├── rtltcp.py            asyncio rtl_tcp server + render-ahead thread
+│   │   ├── base.py              Sink / ServingSink ABCs, SinkContext, register_sink, check_sinks
+│   │   ├── runner.py            the workflow behind `assist run`: selection, run.json, errors, fan-out
+│   │   ├── wavfile.py           `wav` and `cu8`: WAV / RF64 / cu8 writers, SDR++ file names
+│   │   ├── fft.py               `fft`: waterfall PNG
+│   │   ├── stream.py            what serving sinks share: RenderAhead thread, StreamServer, StreamSink
+│   │   ├── rtltcp.py            `rtl_tcp`: the rtl_tcp protocol on top of stream.py
 │   │   └── runinfo.py           run.json
 │   │
 │   ├── dsp_ref/                 numpy twins of the C++ kernels (basic, synth, frontend, modem, conv)
-│   └── profile/                 OFFLINE tool: turns raw recordings into profiles/vhf137 (P1..P14)
+│   └── profile/                 OFFLINE tool: turns raw recordings into profiles/vhf137
 │
 ├── scenarios/                   example scenarios (realtime.yaml is the "live station")
+├── examples/
+│   ├── plugins/                 three plugins as single files: pretty_gfsk (signal), jitter_platform (platform), tcp_sink (sink)
+│   └── assist-examples/         the same three as an installable package with entry points
 ├── profiles/vhf137/             measured data used by the simulator (committed, except bank/)
 ├── elements/                    OMM element-set snapshots (gitignored data; .gitkeep only)
-├── samples/                     LOCAL ONLY (gitignored): recording, waterfall days, station.yaml, plan.md
+├── samples/                     LOCAL ONLY (gitignored): recording, waterfall days, station.yaml
 ├── tests/                       pytest suite (see section 15)
 └── out/                         tool outputs (gitignored)
 ```
@@ -342,9 +374,12 @@ ASSIST/
 ### Module dependencies
 
 Solid arrows mean "imports". Dotted arrows mean "is handed to / receives" without importing (the kernel module `dsp` is *injected* into
-signals and the synthesiser by `Renderer`; the rtl_tcp server receives anything with an `iter_u8` method; `truth` only names `Scene` in type hints).
+signals and the synthesiser by `Renderer`; a serving sink's `RenderAhead` receives anything with an `iter_u8` method; `truth` only names `Scene` in type hints).
 The shape to notice: `config` knows nothing about rendering; `engine` consumes the *validated model* (`config.schema`) and reuses two small helpers from `config.resolve`
 (`pattern_of`, `t_sys_of`); the `signals` never import the engine; and only `engine.render`/`engine.frontend` (and the profile tool) import `backend`, so swapping kernels is a one-place decision.
+`registry` imports nothing from the package: the three base modules (`signals.base`, `platforms.base`, `sinks.base`) import it to register classes, and it imports the core modules by name, lazily, the first time a registry is asked for anything.
+`plugins` sits on top of `registry`; `config.resolve`, `engine.scene` and `engine.workers` call it so that the scenario's plugins are the active ones wherever a scenario is validated, built or rendered.
+`api` only re-exports names from the modules above; nothing in the package imports it.
 
 ```mermaid
 flowchart TD
@@ -372,11 +407,15 @@ flowchart TD
     end
 
     subgraph platforms
+        PBASE["base"]
         PSAT["satellite"]
         PFIX["fixed"]
     end
 
     SIGBASE["signals/*<br/>(base + 10 kinds)"]
+    REGISTRY["registry.py"]
+    PLUGINS["plugins.py"]
+    API["api.py<br/>(re-exports for plugins)"]
 
     subgraph engine
         SCENE["scene"]
@@ -389,8 +428,11 @@ flowchart TD
     end
 
     subgraph sinks
+        SBASE["base"]
+        SRUNNER["runner"]
         SFILE["wavfile"]
         SFFT["fft"]
+        SSTREAM["stream"]
         SRTL["rtltcp"]
         SRUN["runinfo"]
     end
@@ -401,10 +443,30 @@ flowchart TD
 
     CLI --> RESOLVE
     CLI --> SCENE
-    CLI --> REND
-    CLI --> WORK
-    CLI --> sinks
+    CLI --> SRUNNER
     CLI --> CATALOG
+    CLI --> PLUGINS
+
+    SRUNNER --> REND
+    SRUNNER --> WORK
+    SRUNNER --> SCENE
+    SRUNNER --> SBASE
+    SRUNNER --> SSTREAM
+    SRUNNER --> SRUN
+    SFILE --> SBASE
+    SFFT --> SBASE
+    SSTREAM --> SBASE
+    SRTL --> SSTREAM
+    SBASE --> REGISTRY
+    PBASE --> REGISTRY
+    SIGBASE --> REGISTRY
+    PLUGINS --> REGISTRY
+    PSAT --> PBASE
+    PFIX --> PBASE
+    API -.-> SIGBASE
+    API -.-> PBASE
+    API -.-> SBASE
+    API -.-> SSTREAM
     CLI --> TRUTH["truth"]
 
     RESOLVE --> LOADER
@@ -413,14 +475,18 @@ flowchart TD
     RESOLVE --> ELEMENTS
     RESOLVE --> SYNTH_O
     RESOLVE --> LINK
+    RESOLVE --> PLUGINS
+    RESOLVE --> PBASE
     SCHEMA --> SIGBASE
+    SCHEMA --> PBASE
+    SCHEMA --> SBASE
     SCHEMA --> LINK
 
     SCENE --> SCHEMA
     SCENE --> RESOLVE
     SCENE --> SIGBASE
-    SCENE --> PSAT
-    SCENE --> PFIX
+    SCENE --> PBASE
+    SCENE --> PLUGINS
     SCENE --> EMIT
     SCENE --> CARRIER
     SCENE --> SCHED
@@ -449,10 +515,13 @@ flowchart TD
     ESYN -.-> BACKEND
 
     WORK --> REND
-    SRTL -.-> REND
+    WORK --> PLUGINS
+    SSTREAM -.-> REND
 ```
 
-Two design consequences worth remembering:
+Design consequences worth remembering:
+
+* **Nothing names a concrete signal, platform or sink class.** `schema`, `resolve`, `scene` and `runner` reach them through the registries (`signal_class`, `platform_class`, `sink_class`), which is why a plugin's class works wherever a core one does.
 
 * **`config.resolve` imports `emitters.link` and `orbits.*`** because resolving a *level* needs the link budget and resolving
   an *orbit* needs Skyfield. That is why `resolve` is slow-ish (a synthetic pass solve takes a second or so) and why it
@@ -483,12 +552,12 @@ flowchart LR
 ```
 
 Errors on the way: stage 1 raises `ConfigError` (bad include, unknown preset, bad `--set` path), stage 2 `ConfigError`
-(bad expression), stage 3 pydantic `ValidationError` (typo, wrong type, impossible combination), stage 4 `ConfigError`
+(bad expression; also a plugin that is missing, fails to import, declares an incompatible API or clashes with another name), stage 3 pydantic `ValidationError` (typo, wrong type, impossible combination), stage 4 `ConfigError`
 or `ValueError` (unknown NORAD, synthetic pass cannot converge, unknown calibration). `cli._resolve` catches all of them,
 prints `error: ...` and exits with code 2.
 
-The entry point is a single call chain: `cli._resolve(scenario, sets)` -> `config.resolve.resolve(path, sets)` ->
-`resolve_document(load_scenario(path, sets), base=cwd, now=None)`.
+The entry point is a single call chain: `cli._resolve(scenario, sets, plugins)` -> `config.resolve.resolve(path, sets, extra_plugins=...)` ->
+`resolve_document(load_scenario(path, sets), base=cwd, now=None, scenario_dir)`. `--plugin` values are appended to the document's `plugins:` list first, so they end up in the resolved scenario like any other.
 
 ```mermaid
 sequenceDiagram
@@ -509,6 +578,7 @@ sequenceDiagram
     LD->>LD: expand_source for each source (presets)
     LD-->>CLI: merged dict
     CLI->>RS: resolve_document(dict, cwd)
+    RS->>RS: plugins.activate(doc.plugins): import the listed modules,<br/>make their classes the active external ones
     RS->>RX: draw_all(dict, KeyedRng(seed))
     RX-->>RS: dict without random expressions
     RS->>SC: Scenario.model_validate(...)
@@ -594,7 +664,7 @@ Then every key the user gave on the source is routed by the **first matching rul
 
 ```mermaid
 flowchart TD
-    K["a key k on the source"] --> Q1{"k in SOURCE_KEYS?<br/>id preset platform name orbit<br/>in_catalog catalog_norad channels"}
+    K["a key k on the source"] --> Q1{"k in SOURCE_KEYS?<br/>id preset platform platform_params name<br/>orbit in_catalog catalog_norad channels"}
     Q1 -- yes --> A1["source-level: deep_merge into the source<br/>(user overrides the preset)"]
     Q1 -- no --> Q2{"k equals the id of<br/>one of the emitters?"}
     Q2 -- yes --> A2["deep_merge the value into<br/>THAT emitter"]
@@ -682,6 +752,7 @@ classDiagram
         elements: Elements
         sources: Source[]
         sinks: dict[]
+        plugins: Plugin[]
         assist_version
         band_hash
         profile_hash
@@ -689,7 +760,8 @@ classDiagram
     class Source {
         id
         preset?
-        platform: satellite, ground or local
+        platform: a registered name
+        platform_params: dict
         orbit: Orbit?
         in_catalog?
         catalog_norad?
@@ -737,7 +809,8 @@ Things the schema does beyond types (these are the rules you hit as error messag
 * **`SignalConfig`**: `kind` must be a known kind (`get_kind`), and `check_params` validates the kind's parameter model and **writes back the defaults**, so a resolved scenario lists every parameter. A kind is known when it is a core kind or comes from a module the scenario lists under `plugins:` (those are loaded before validation).
 * **`Level._one`**: exactly one of the five level keys. (A resolved level holds exactly `p_tx_dbw` or `rx_dbm`, plus `resolved_from`.)
 * **`Emitter._frequency`**: exactly one of `freq_hz`/`channel`; a frequency *list* only for event signals; `level` required except for wideband kinds; wideband kinds forbid `level`, `per_event`, `am` and need an event schedule (episodes); `per_event` needs an event schedule.
-* **`Source._unique_emitters`**: satellites need an orbit; ground/local forbid orbit, catalog flags and `oscillator`; wideband kinds only on `local`; unique emitter ids; integer `channel` indices within `channels`.
+* **`Source`**: `platform` must be a registered platform (`platform_class`), and `platform_params` is validated by that platform's `Params` model, with the defaults written back. The rules about what the source may have are read from the platform's **capabilities** (`_unique_emitters`): `needs_orbit` -> an `orbit` is required, otherwise forbidden; without `catalog` no `in_catalog`/`catalog_norad`; `oscillator` only with `supports_oscillator`; wideband kinds only with `allows_wideband`. For the three core platforms that reads: satellites need an orbit; ground/local forbid orbit, catalog flags and `oscillator`; wideband kinds only on `local`. Also: unique emitter ids; integer `channel` indices within `channels`.
+* **`Plugin`**: one `plugins:` entry (a bare string is a `name`); exactly one of `name`, `path`, `module`, plus optional `prefix`, `only`, and the fields resolve fills in (`sha256`, `version`, `api`).
 * **`Frontend`**: `ppm` must be 0 ("only 0 is supported"), `fs_hz` a positive integer multiple of 100 Hz (so a hop is a whole number of samples).
 * **`Clock`**: `start` is `now` or an ISO time with zone (normalised to `YYYY-MM-DDTHH:MM:SSZ`), `duration` accepts `90s`, `10min`, `2h`, `1d`.
 * **`Elements`**: `latest` and `latest_existing` are mutually exclusive.
@@ -751,7 +824,9 @@ with the sink's own `Params` model (the `fft` sink reuses `FftSpec.from_dict`), 
 `resolve_document(doc, base, now)` is the longest function in the config package, and the most important one: it freezes
 everything that is not a pure function of the file's text. In order:
 
-#### 5.4.1 Seed and validation
+#### 5.4.1 Plugins, seed and validation
+`plugins.activate(doc["plugins"], (base, scenario_dir))` runs **first**: the schema can only check `signal.kind`, `platform` and `sinks` once the external classes are registered. It returns the entries normalised and stamped with `api`, `version` and (for a file) `sha256`, and those replace the document's list ([18.2](#182-loading-plugins-pluginspy)). A document without a `plugins` key deactivates any plugin left from an earlier scenario in the same process.
+
 `seed` must be a non-negative `int` (`bool` rejected). Then `draw_all` and `Scenario.model_validate`.
 
 #### 5.4.2 `clock.start: now`
@@ -775,7 +850,7 @@ re-resolving a resolved document never downloads again and the catalog tools rea
 
 For every source (`for src in sc.sources`):
 
-**Orbit (`_orbit`)**, satellites only:
+**Orbit (`_orbit`)**, only for platforms with `needs_orbit` (the core `satellite`):
 
 | Orbit form | What resolve does |
 |---|---|
@@ -796,8 +871,7 @@ For every source (`for src in sc.sources`):
 * `am` without `phase_rad`: drawn uniformly in `[0, 2 pi)` from `("resolve", sid, "emitters[id].am.phase_rad")`.
 * **Level**: see below.
 
-**Level resolution (`_level` / `_fixed_level`).** Everything is turned into the one number the engine needs: *transmit power in dBW* for a
-satellite, *received power in dBm* for a ground or local emitter. Satellites:
+**Level resolution (`_level` / `_fixed_level`).** Everything is turned into the one number the engine needs. The platform's `level_mode` decides which: `link_budget` (the core `satellite`) -> *transmit power in dBW*; `received` (ground, local and every external platform) -> *received power in dBm*. Link budget:
 
 ```mermaid
 flowchart TD
@@ -805,7 +879,7 @@ flowchart TD
     Q -- "p_tx_dbw" --> P1["p = p_tx_dbw"]
     Q -- "cn0_zenith_dbhz" --> P2["h = orbit height above station<br/>p = cn0 - (G_tx(0) + G_rx(0) - FSPL(h, f) - L_extra) + 10 log10(k T_sys)"]
     Q -- "cal: name" --> P3["K = calibration table[name] (dB-Hz)<br/>p = K + 10 log10(k T_sys)"]
-    Q -- "cn0_dbhz / rx_dbm" --> ERR["ConfigError: these are for ground/local"]
+    Q -- "cn0_dbhz / rx_dbm" --> ERR["ConfigError: these are received levels"]
     P1 --> OUT
     P2 --> OUT
     P3 --> OUT
@@ -817,7 +891,7 @@ flowchart TD
   `P_tx = C/N0 - [G_tx(0) + G_rx(0) - FSPL(h, f) - L_extra] + 10 log10(k T_sys)` using the emitter's *first* frequency.
 * **`cal`**: calibrated *link constants* (see [6.7](#67-the-link-budget-and-calibrations)). `meteor_auto` becomes `meteor_m2_3` / `meteor_m2_4` if the source's NORAD id matches an entry with a `norad`, else the joint `meteor`.
   The table comes from the profile (`meteor_cal.json`, `orbcomm_ref.json`) when the scenario has `profile:`, else from `band.yaml`'s `calibrations`.
-* Ground/local: `cn0_dbhz` -> `rx_dbm = cn0 - extra_loss + 30 + 10 log10(k T_sys)` (the `+30` converts dBW to dBm); `rx_dbm` -> `rx_dbm - extra_loss`.
+* Received levels (ground, local, external platforms): `cn0_dbhz` -> `rx_dbm = cn0 - extra_loss + 30 + 10 log10(k T_sys)` (the `+30` converts dBW to dBm); `rx_dbm` -> `rx_dbm - extra_loss`.
 
 `resolved_from` records the arithmetic in words, e.g. `cn0_zenith_dbhz 45.0 at 819.8 km, T_sys 726.6 K`. That string is part of the resolved scenario.
 
@@ -837,19 +911,21 @@ re-reading the JSON would give (floats normalised, defaults identical).
 
 ### 5.5 Stage 5: the canonical form and the hash
 
-`canonical_json(sc)` = `json.dumps(sc.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), ensure_ascii=False)`. The
-**scenario hash** is its sha256. Properties:
+`canonical_json(sc)` = `json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)`, where `doc` is `sc.model_dump(mode="json")` with two things left out when empty: the `plugins` list, and a source's `platform_params`. A scenario that uses only core modules therefore has the same canonical form whether or not the plugin machinery exists.
+
+The **scenario hash** (`Resolved.hash`) is the sha256 of the same JSON **with `sinks` emptied**: the hash names *what is rendered*, not where it goes, so `--set 'sinks[wav].rf64=true'` or adding a sink leaves it alone. Properties:
 
 * **Idempotent.** A resolved document resolves to itself: `omm`, `solution`, `resolved_from`, a concrete clock start, a concrete element file list and
   `phase_s` are all present, so every "if missing, fill in" branch is skipped. That is why `assist resolve -o r.json` followed by `assist run r.json` is legal.
 * **Complete.** The hash covers the seed, clock, station position, front end, antenna, band and profile content hashes, every source, orbit, element set, solved orbit, level and parameter.
   Same hash => same stream (to the bit with the same kernels; C++ and numpy builds differ by at most one count in a few per million samples).
 * **Machine-independent.** The element data is embedded, the profile is hashed by content (not path), and the profile is named by its path *as written in the scenario*.
-* **What it does not cover:** the *code*. `run.json` records `assist_version` and the engine name next to the hash.
+* **Plugins are covered.** Each `plugins:` entry carries the plugin's declared `api`, its `version` and, for a file, the `sha256` of its content: a changed plugin is a changed scenario. A resolved scenario refuses a plugin file whose content no longer matches.
+* **What it does not cover:** ASSIST's own *code*, and the `sinks`. `run.json` records `assist_version`, the engine name, the API version and the sinks that ran next to the hash.
 
 ### 5.6 Stage 6: building the scene (`engine/scene.py`)
 
-`Scene(resolved_scenario)` refuses an unresolved scenario (`clock.start == "now"` or `assist_version is None`). Then, for each source:
+`Scene(resolved_scenario)` refuses an unresolved scenario (`clock.start == "now"` or `assist_version is None`). It first calls `plugins.activate` with the scenario's own list, so exactly that scenario's external classes are active while it is built and rendered (a worker process, or a second scenario in one process, starts from a clean state). Then, for each source, the platform class is looked up in the registry and built with `cls.build(PlatformContext(...))`: the source id and name, the validated `platform_params`, the station, `horizon_deg`, the scope `rng.scope("platform", platform, source_id)` and the resolved source itself (which the core `satellite` reads its `orbit` from).
 
 ```mermaid
 classDiagram
@@ -869,9 +945,15 @@ classDiagram
     }
     class Platform {
         <<abstract>>
-        fixed: bool
+        Params
+        fixed, needs_orbit, catalog
+        supports_oscillator, level_mode
+        fades_at_horizon, allows_wideband
+        build(ctx)
         geometry(t)
+        geometry_ms(k)
         passes(t0, t1)
+        max_speed_km_s()
     }
     class SatellitePlatform {
         sat: EarthSatellite
@@ -926,10 +1008,11 @@ classDiagram
 
 For each *enabled* emitter the scene builds:
 
+* the emitter's **scope** `rng.scope(source_id, emitter_id)`, handed to the carrier and the schedule (the signal gets the same prefix later, as `Keys`);
 * a **`Carrier`** with `rest_mhz = to_mhz(freq) + to_mhz(offset_hz)` - for an event emitter with several frequencies, a tuple of them (`freqs_mhz`), and the first is the carrier's rest;
 * an **`AmModel`** if `am` is set;
 * a **`Schedule`** via `make_schedule`, with an **`EventMaker`** from `make_maker` for event signals and emitters with `per_event`;
-* the **`Emitter`** record itself, copying the resolved `p_tx_dbw` or `rx_dbm`, the transmit pattern, `extra_loss_db`, the shared receive pattern, `T_sys`, and `fade_s` (for satellites only; ground and local get 0).
+* the **`Emitter`** record itself, copying the resolved `p_tx_dbw` or `rx_dbm`, the transmit pattern, `extra_loss_db`, the shared receive pattern, `T_sys`, and `fade_s` (`station.fade_s` when the platform declares `fades_at_horizon`, as the satellite does; 0 otherwise).
 
 **The event maker** is the interesting part. When an event schedule creates an event, the maker draws its duration and parameters from the *same keyed slot
 stream*, in a fixed order:
@@ -1124,7 +1207,7 @@ f_tx(t) = f_nominal + offset_hz + pass_offset(p) + drift(p) * (t - t_aos(p))
 inside the phase computation ([9.4](#94-control-samples-amplitude-and-carrier-phase)).
 
 **Doppler.** The received frequency is `f_rx = f_tx + doppler` with `doppler = -f_tx * range_rate / c` (first order). In the IQ stream Doppler is not applied as a frequency shift at all: it is **the time derivative of the range phase `-2 pi f_tx R(t)/c`**, so the instantaneous frequency of the rendered carrier is
-automatically `f_tx - f_tx * dR/dt / c` (plus a tiny `-drift * R/c` term, ~1 mHz at the worst case). Truth and IQ therefore agree by construction (test family **T-DOP**).
+automatically `f_tx - f_tx * dR/dt / c` (plus a tiny `-drift * R/c` term, ~1 mHz at the worst case). Truth and IQ therefore agree by construction (checked in `test_orbits` and `test_render`).
 
 ### 7.2 Schedules (`emitters/schedules.py`)
 
@@ -1215,15 +1298,16 @@ x   = min( min(t - AOS, LOS - t) / fade_s , 1 )
 gain = 0.5 - 0.5 cos(pi x)           (an amplitude gain, 0 outside the pass)
 ```
 
-At 7.5 s into the fade the amplitude is 0.5 (-6 dB). A pass shorter than `2 * fade_s` never reaches full level. `fade_s: 0` switches it off. It only applies to satellite emitters (`Emitter.fade_s = 0` for ground/local).
+At 7.5 s into the fade the amplitude is 0.5 (-6 dB). A pass shorter than `2 * fade_s` never reaches full level. `fade_s: 0` switches it off. It applies to platforms that declare `fades_at_horizon` (the satellite); `Emitter.fade_s = 0` for all others.
 The noise is untouched, so a signal fades *into noise*, like a real one dropping below the horizon. **The fade is applied in the IQ but not in `truth`**: truth rows are present for the whole above-horizon pass with full link-budget levels.
 
 ### 7.6 Ground and local emitters
 
-They have no geometry. In the code they are `FixedPlatform`s with `fixed = True`:
+They have no geometry. In the code they are `FixedPlatform`s with the capability `fixed = True` (`local` adds `allows_wideband`). The columns below are the capabilities of `platforms/base.py` spelled out for the three core platforms; a platform from a plugin picks its own combination, within the limits in [18.4](#184-platforms-by-capability):
 
 | | satellite | ground | local |
 |---|---|---|---|
+| `fixed` | no | yes | yes |
 | orbit, passes, Doppler | yes | no | no |
 | level | `p_tx_dbw`, then the link budget at each instant | fixed `rx_dbm` | fixed `rx_dbm` |
 | antenna patterns | tx and rx | none (level is at the antenna terminals) | none |
@@ -1242,7 +1326,9 @@ When an emitter has `per_event` or is a fixed event emitter, the engine renders 
 
 ### 8.1 The contract (`signals/base.py`)
 
-Every modulation is a subclass of `Signal`. It receives validated parameters (`Params`, a pydantic model with `extra="forbid"` whose defaults are written into the resolved scenario), a `Keys` object (`rng`, `source_id`, `emitter_id`; `keys.key64(*purpose)` -> a 64-bit Philox key), and the kernel module `dsp`.
+Every modulation is a subclass of `Signal`, registered under its kind name with `@register_signal("name")` (the decorator checks `Params` and `mode` and sets `cls.kind`). It receives validated parameters (`Params`, a pydantic model with `extra="forbid"` whose defaults are written into the resolved scenario), a `Keys` object, and the kernel module `dsp`.
+
+`Keys` is the emitter's `RngScope`, prefix `(source_id, emitter_id)`: `keys.key64(*purpose)` gives a 64-bit Philox key, `keys.stream(*parts)` a numpy Generator. The signal holds neither the seed nor the `KeyedRng`. `make_signal` hands a core kind exactly this scope (so the keys are those the kinds have always used), and a kind from a plugin the same emitter's keys under the namespace `("signal", kind)`.
 
 Three **modes**:
 
@@ -1690,7 +1776,7 @@ The test `test_render_window_independence` renders a stretch directly and as a s
 | `narrow rate ... Hz would exceed the sample rate` | A signal plus its Doppler wouldn't fit in 2.4 MHz. |
 | `frequency excursion ... exceeds ...` | A carrier left its narrow band: a rate/drift/offset bigger than the bound the rate was chosen for. |
 | `pass without a key` | A pass lacked an `aos_key` (cannot happen with SplineGeometry). |
-| `frontend.ppm must be 0 until M8` | Crystal error is not modelled. |
+| `frontend.ppm must be 0 (the crystal error is not modelled)` | Reached only when a scenario bypasses the schema, which refuses `ppm != 0` first. |
 | `<kind> is not an event signal` / `... needs exp_gaps or poisson_events` | Event signals need an event schedule. |
 | `exp_gaps: event durations (max_s) must not exceed min_gap_s` | Slots could overlap. |
 | `profile ... is for fc ..., fs ...` | The profile's band parameters don't match the scenario's front end. |
@@ -1727,7 +1813,7 @@ All numeric heavy lifting is in one extension module, `assist._dsp` (`cpp/`, bui
   `ln_poly`: split `x = m 2^e` with `m` in [sqrt(1/2), sqrt(2)), `ln m = 2 atanh((m-1)/(m+1))` by its series to `s^9`; `sin`/`cos`: the **top two bits of the second word pick a quadrant** (an exact rotation), the next 24 bits give an angle in `[-pi/4, pi/4)`, evaluated by Taylor series to `t^9`/`t^10` (error < 2e-9).
   Because this is deterministic IEEE arithmetic, the noise is **bit-identical across compilers, OSes and the numpy twin**.
 
-**The twins** (`src/assist/dsp_ref/`, one module per C++ source) have the same names, signatures and dtypes; `tests/test_dsp_ref.py` (T-REF) compares them (`white`, `adc`, `random_bytes`, `conv_encode`, `ccsds_randomise` exactly; the others to rtol 1e-5).
+**The twins** (`src/assist/dsp_ref/`, one module per C++ source) have the same names, signatures and dtypes; `tests/test_dsp_ref.py` compares them (`white`, `adc`, `random_bytes`, `conv_encode`, `ccsds_randomise` exactly; the others to rtol 1e-5).
 `assist/backend.py` selects: `ASSIST_PURE` set to anything but `""`, `0`, `false`, `no` -> numpy, else the C++ module; **there is no silent fallback** (a missing C++ module is an ImportError unless `ASSIST_PURE` is set). `assist --version` prints which is in use.
 
 C++ edits need no reinstall: with the editable install, `editable.rebuild = true` re-runs CMake on the next import (`build/{wheel_tag}` is a fixed build dir for exactly that).
@@ -1736,14 +1822,28 @@ C++ edits need no reinstall: with the editable install, `editable.rebuild = true
 
 ## 11. Outputs: files, waterfall, rtl_tcp, run.json, workers
 
-All three IQ sinks consume the same thing: a sequence of `uint8` arrays (interleaved I, Q) in order. They differ in where it goes.
+Every sink consumes the same thing: a sequence of `uint8` arrays (interleaved I, Q) in order. They differ in where it goes.
+
+**The sink protocol** (`sinks/base.py`). A sink is a class registered with `@register_sink("name")`, with a pydantic `Params` model for its settings. A scenario lists sinks under `sinks:` as one-key mappings; `check_sinks` validates each entry against the sink's `Params` at schema time. There are two flavours:
+
+| | Push sink (`Sink`) | Serving sink (`ServingSink`) |
+|---|---|---|
+| Core examples | `wav`, `cu8`, `fft` | `rtl_tcp` |
+| How it gets the stream | `write(u8)` for every piece, in order, as fast as it renders | pulls from a `RenderAhead` ring inside `async serve(ahead)` |
+| Per run | any number together | exactly one, and nothing else |
+| Stream length | finite: `--duration`, else the scenario clock; the sink may plan less (`planned()`) | endless unless `--duration` |
+| Lifecycle | `__init__(params, ctx)`, `planned()`, `files()`, `open()`, `write()`..., `close()` or `abort()`, `info()`, `summary()` | `__init__`, `serve()`, `info()`, `summary()` |
+
+Both are built from a `SinkContext`: `fs`, `fc_hz`, `n0`, `n` (or `None`), the output directory, the station time zone, an `RngScope` under `("sink", name)`, the scenario hash, and for a live stream the wall-clock start.
+
+**The runner** (`sinks/runner.py::run`, the whole of `assist run`) owns everything a sink should not have to repeat: choosing the sinks (`select_sinks`: the scenario's list, or `--sink` names; push sinks only or exactly one serving sink, a mix is refused with a message that names `--sink`), building `Scene` and `Renderer` once, the overwrite check on every sink's `files()`, `run.json` before and after, progress lines, and the mapping of errors to exit codes (`RenderError` -> 2, `OSError` -> 1, a refused overwrite -> 1, Ctrl-C -> status `stopped`). In a push run each piece goes to every sink until that sink has the samples it planned; the run ends when all have theirs, so an `fft` sink with a short `duration` next to a `cu8` sink ends early while the file continues.
 
 ```mermaid
 flowchart LR
-    RD["Renderer.iter_u8(n0, n)<br/>(or workers.iter_u8 for N processes)"] --> F["FileSink<br/>wav / rf64 / cu8"]
-    RD --> W["WaterfallSink<br/>FFT rows -> PNG"]
+    RD["Renderer.iter_u8(n0, n)<br/>(or workers.iter_u8 for N processes)"] --> F["WavSink / Cu8Sink<br/>(FileSink: wav / rf64 / cu8)"]
+    RD --> W["FftSink<br/>(WaterfallSink: FFT rows -> PNG)"]
     RD --> RA["RenderAhead thread<br/>-> ring buffer"]
-    RA --> SRV["RtlTcpServer (asyncio)<br/>-> N clients"]
+    RA --> SRV["RtlTcpSink<br/>(RtlTcpServer, asyncio) -> N clients"]
     F --> RJ["run.json"]
     W --> RJ
     SRV --> RJ
@@ -1754,14 +1854,14 @@ flowchart LR
 | Format | What it is |
 |---|---|
 | `wav` | PCM WAV, 2 channels, 8-bit unsigned, `fs`. The header is the **canonical 44 bytes** (`RIFF` + `fmt ` + `data`, nothing else) because SDR++'s file source reads a fixed layout. **Split every 600 s** (2.88 GB at 2.4 MS/s, under the 4 GiB RIFF limit). |
-| `rf64` | One file of any length: `RF64`, `ds64` (64-bit sizes), `fmt `, `data`; the 32-bit size fields hold `0xFFFFFFFF`. (SDR++ 1.2.1's WAV source does not read RF64.) |
+| `rf64` (`wav` with `rf64: true`) | One file of any length: `RF64`, `ds64` (64-bit sizes), `fmt `, `data`; the 32-bit size fields hold `0xFFFFFFFF`. (SDR++ 1.2.1's WAV source does not read RF64.) |
 | `cu8` | One headerless file of interleaved bytes, exactly what `rtl_sdr` writes. |
 
 * **Naming** follows SDR++: `baseband_137000000Hz_HH-MM-SS_DD-MM-YYYY.wav`, the file's first-sample time **in station local time** (`station.tz`, a fixed offset like `+03:00`), truncated to the second.
 * `plan_files(...)` returns `OutFile(path, first, n_samples, start_sample)` for each file; `first` counts from the start of the render, `start_sample` is the absolute sample index. Duplicate names (a split shorter than 1 s) are refused.
-* `FileSink.write(u8)` takes pieces of any size, straddling file boundaries; `close()` checks that the planned number of samples was written.
+* `FileSink.write(u8)` takes pieces of any size, straddling file boundaries; `close()` checks that the planned number of samples was written. The registered sinks `WavSink` and `Cu8Sink` are thin wrappers (`_FileStreamSink`) that plan the files from the `SinkContext` and forward to it.
 * **Headers are written with their final sizes up front**, so an interrupted render leaves files whose headers claim too much; readers that tolerate that (SDR++, `profile.wavio`) read to the end.
-* The runner (`sinks/runner.py`, behind `assist run`) refuses to overwrite (`--force`), writes `run.json` with status `rendering` before the first byte and `complete` after the last, prints progress every 60 s of stream, and reports `x real time`.
+* The runner refuses to overwrite (`--force`), writes `run.json` with status `rendering` before the first byte and `complete` after the last, prints progress every 60 s of stream, and reports `x real time`. The default output directory is `out/<scenario name>`.
 
 ### 11.2 The waterfall sink (`sinks/fft.py`, `waterfall.py`)
 
@@ -1771,10 +1871,13 @@ A parametrised copy of the capture script that made the station's real waterfall
 * Bytes are converted to IQ as `(u - 127.5) / 127.5`. Power is scaled by `16384 / width`, so a given dB reads the same for any width.
 * **Pixel** `= clip((10 log10(mean + 1e-12) - min_db) / (max_db - min_db) * 255, 0, 255)`, truncated (not rounded) to `uint8`.
 * **Levels**: both `min_db`/`max_db` given, or neither. Neither: `min_db` = mean over bins of the spectrum (in dB) of the first 5 s, minus 5, and `max_db = min_db + 30`; rows are *held* until the calibration is known, then drawn.
-* The image is `width` columns by `floor(duration * fs / row_samples)` rows, oldest at the top. `duration` is mandatory (the sink never runs open-ended). It accepts pieces of any size, so the result is independent of chunking.
+* The image is `width` columns by `floor(duration * fs / row_samples)` rows, oldest at the top. The sink never runs open-ended: `FftSink` limits the spec to the run's stream (`spec.limited`), and its own `duration`, when shorter, makes it finish early (`planned()`). It accepts pieces of any size, so the result is independent of chunking.
 * The PNG is written via a `.png.part` file and renamed; an interrupted run keeps the finished rows.
 
-### 11.3 The rtl_tcp server (`sinks/rtltcp.py`)
+### 11.3 The rtl_tcp server (`sinks/stream.py`, `sinks/rtltcp.py`)
+
+Serving is split in two. `stream.py` holds what any serving sink needs: `RenderAhead` (the render thread and its ring), `StreamServer` (accepting clients, pre-roll, pacing, live start, fan-out, stall accounting, the backlog guard, the status line) and `StreamSink` (a `ServingSink` made of one `StreamServer`). A protocol is a `StreamServer` subclass with three hooks: `greeting()` (bytes sent on connect), `read_client(reader, peer)` (what to do with what a client sends) and `encode(chunk)` (how a chunk goes on the wire).
+`rtltcp.py` is the rtl_tcp protocol in those terms: the dongle header as greeting, the 5-byte command parser in `read_client`, the bytes unchanged. The example plugin `examples/plugins/tcp_sink.py` is another protocol on the same base (no header, cu8/cs16/cf32 encoding).
 
 The `rtl_tcp` sink of `assist run` speaks the protocol of librtlsdr's `rtl_tcp`, so SDR++'s **RTL-TCP** source (or anything that uses `rtl_tcp`) connects as if to a real dongle.
 
@@ -1790,8 +1893,8 @@ flowchart LR
     end
     CUT --> Q[("queue.Queue<br/>capacity = ceil(lookahead x fs / 16384)<br/>= 147 for 1 s")]
     subgraph AL["asyncio loop  (main thread)"]
-        S["_stream():<br/>pace, get_nowait, _send"]
-        H["_handle(client):<br/>send header, read 5-byte commands"]
+        S["_stream():<br/>pace, get_nowait, encode, _send"]
+        H["_handle(client):<br/>send greeting(), then read_client()<br/>(rtl_tcp: 5-byte commands)"]
     end
     Q --> S
     S --> C1["client A: StreamWriter"]
@@ -1805,14 +1908,14 @@ The render thread holds the GIL only for the Python control plane; the C++ kerne
 
 ```mermaid
 sequenceDiagram
-    participant CLI as cli.serve
+    participant CLI as runner._serve
     participant RA as RenderAhead thread
-    participant SRV as RtlTcpServer._stream
+    participant SRV as StreamServer._stream
     participant CL as client(s)
 
     CLI->>CLI: live? = realtime and no --from and clock.start == now
     CLI->>CLI: wall = ceil(now + lookahead + 1 s) if live, n0 = wall * fs
-    CLI->>SRV: serve() (listen on host:port)
+    CLI->>SRV: asyncio.run(sink.serve(ahead)) (listen on host:port)
     SRV->>RA: start()
     loop render ahead
         RA->>RA: render a piece, cut into chunks
@@ -1830,24 +1933,29 @@ sequenceDiagram
 ```
 
 * **Live mode.** With `clock.start: now` (and no `--from`), `n0 = wall * fs` with `wall` a whole second slightly in the future, and the anchor is that wall time: **sample time equals wall time** for the entire session. SDR++'s waterfall then shows the satellites that are really overhead. Otherwise the stream starts at `--from`/the clock start and is merely paced at real time.
-* **Pre-roll.** The stream starts only when the ring is full (`lookahead` seconds rendered) - or, in live mode, when the planned start time arrives, in which case it warns `pre-roll incomplete`. With ~50 sources the first second needs a few seconds to prepare, hence `--lookahead 4s`.
+* **Pre-roll.** The stream starts only when the ring is full (`lookahead` seconds rendered) - or, in live mode, when the planned start time arrives, in which case it warns `pre-roll incomplete`. With ~50 sources the first second needs a few seconds to prepare, hence `lookahead: 4s` in `realtime.yaml`'s `rtl_tcp` sink.
 * **Stalls.** If the ring is empty at a chunk's due time the stream waits, logs it, and moves the anchor by the stall's length: *content is unchanged, only the wall-clock alignment slips*. `run.json` counts `stalls` and `stall_s`.
 * **Fan-out.** Every client receives exactly the same chunks, from the first chunk sent after it connects (`_Client.since` records the absolute sample). **With nobody connected the chunks are dropped and the stream keeps running**, so time keeps tracking the wall clock.
-* **Backlog guard.** There is no per-client dropping (clients are assumed local), but a client whose unsent data exceeds `max_backlog_s` = 10 s of stream (48 MB) is disconnected so a stuck client cannot exhaust memory.
+* **Backlog guard.** There is no per-client dropping (clients are assumed local), but a client whose unsent data exceeds `max_backlog_s` = 10 s of stream (48 MB) is disconnected so a stuck client cannot exhaust memory (counted as `slow_disconnects`). The limit is a `StreamServer` argument; the example `tcp` sink makes it a setting.
 * **`pacing: unpaced`** (a sink setting)**.** Chunks go out as fast as the slowest client reads (`drain()` back-pressure), and the stream *holds* while nobody is connected. Used by tests and for fast piping into another tool.
 * A status line (clients, ring fill, minimum fill, stalls) is logged every 60 s. Ctrl-C stops the server; `finally` closes clients and joins the render thread.
 
 ### 11.4 `run.json` (`sinks/runinfo.py`)
 
-Written atomically (`.json.part` then rename) next to every render/serve/fft output, first with status `rendering`/`serving`, then again at the end (`complete`, `stopped`, `error`). It is **provenance, not truth**: truth is always recomputed from the scenario.
+Written atomically (`.json.part` then rename) into the output directory of every run, first with status `rendering`/`serving`, then again at the end (`complete`, `stopped`, `error`). It is **provenance, not truth**: truth is always recomputed from the scenario.
 
 ```
-status, assist_version, engine ("c++ (M7)" | "c++, -march=native (M7)" | "numpy reference (M7)"), scenario_hash, clock_start
-render:   format, fc_hz, fs_hz, start_sample_abs, start_utc, n_samples, duration_s, station_tz
+status, assist_version, engine ("c++" | "c++, -march=native" | "numpy reference"), scenario_hash, clock_start
+api_version
+plugins:  [{plugin, version, api, sha256, module, file, distribution, registers}, ...]   (those the scenario loaded)
+render:   fc_hz, fs_hz, start_sample_abs, start_utc, n_samples (null: endless), duration_s, station_tz
 noise:    source (e.g. "profile profiles/vhf137"), sigma_counts, adc_gain_counts_per_sqrt_mw, t_sys_k
 emitters: [{id, narrow_rate_hz, f_bin_hz}, ...]
+sinks:    [{kind, params, info}, ...]   one per sink that ran; `info` is what the sink reports:
+            wav/cu8 {format, samples_written}, fft {width, height, min_db, max_db, ...},
+            rtl_tcp {host, port, pacing, live, lookahead_s, stream{samples, seconds, stalls, stall_s, clients, slow_disconnects}}
 files:    [{name, first_sample, n_samples, start_sample_abs, start_utc, duration_s}, ...]
-(extras)  workers, render_seconds | serve{host, port, pacing, live, lookahead_s}, stream{samples, seconds, stalls, ...} | fft{width, height, min_db, max_db, ...}
+(extras)  workers, render_seconds   (push runs)
 scenario: the complete resolved scenario
 ```
 
@@ -1869,7 +1977,7 @@ flowchart TD
 ```
 
 * Processes, not threads: the per-chunk **control plane is Python and holds the GIL**; the C++ kernels release it but cannot carry the whole load.
-* Workers receive only `canonical_json` and `base`, and build their own `Renderer`. Each task's first chunk recomputes the previous chunk's tail itself, which costs about 1 % for 4 s tasks.
+* Workers receive only `canonical_json`, `base` and the table of where the parent found its plugin files (`plugins.located()`), and build their own `Renderer`. Each worker activates the scenario's plugins itself before validating the JSON, checking a file plugin's sha256 against the resolved scenario. Each task's first chunk recomputes the previous chunk's tail itself, which costs about 1 % for 4 s tasks.
 * The result bytes are **identical for any worker count** (`bench` checks this by hashing both streams with BLAKE2b and exits non-zero if they differ).
 * `assist bench`: (1) on one worker, renders after a 1 s warm-up and prints `x real time` plus **ms per second of stream spent in each stage** (`control`, `synth`, `wideband`, `noise`, `adc`, `other`); (2) on N workers, starts the pool, renders `N x 4 s` as warm-up (timed separately), then times the window; writes `out/bench/<scenario>.json`.
 
@@ -1913,7 +2021,7 @@ What truth deliberately **does not** include: the 15 s fade ramps (rows exist fo
 For a satellite, the event is kept only if its **midpoint** is above the horizon; frequency and level are evaluated at the midpoint, on the event's own channel (`shift = channel_rest - carrier_rest` is added to `f_tx` and the Doppler recomputed for it, and the link budget at that frequency).
 Per-event draws are added: `+ offset_hz` to the frequency, `+ level_db` to the level. A `noise_comb` episode has no single frequency or level, so those cells are empty (its `amplitude_db` and `spacing_hz` are in `params`).
 
-`--platforms satellite,ground,local` filters; `--format jsonl` writes JSON lines with the same fixed-precision text. Output files: `<out>` and `<stem>.events.<fmt>`.
+`--platforms` filters by registered platform name (`satellite,ground,local`, or one from a plugin; an unknown name is an error; default: all); `--format jsonl` writes JSON lines with the same fixed-precision text. Output files: `<out>` and `<stem>.events.<fmt>`.
 
 ### 12.3 `assist catalog` - what the tracker is given
 
@@ -1941,10 +2049,11 @@ Per-event draws are added: `+ offset_hz` to the frequency, `+ level_db` to the l
 | `run` (file sinks: `wav`, `cu8`, `fft`) | yes | `Scene`, `Renderer`, the sinks | `sinks.runner.run`: `Renderer.iter_u8` or `workers.iter_u8`, each piece to every sink | + profile arrays | IQ files / PNG + `run.json` |
 | `bench` | yes | `Renderer` x2 | `engine.bench.run` | same | `out/bench/<name>.json` |
 | `run` (a serving sink: `rtl_tcp`) | yes (`Resolved.clock_now` says whether the clock was `now`) | `Scene`, `Renderer(prefetch=True)`, `RenderAhead`, the sink's `StreamServer` | `sinks.runner.run`: `asyncio.run(sink.serve(ahead))` | same | `run.json` |
+| `plugins list [SCENARIO]` | no (only the `plugins:` list is read and activated) | - | `plugins.activate`, the three registries | scenario, plugin modules | stdout |
 | `fetch_omm` / `elements fetch` | no | - | `elements.fetch` | network | `elements/<feed>_<date>.csv` |
 | `profile build \| labels \| report \| terrestrial` | no | - | `assist.profile.*` | `samples/` | `profiles/vhf137/`, `out/profile/`, `bands/.../terrestrial_default.yaml` |
 
-Common to all scenario commands: scenario path first, repeated `--set path=value`; errors print `error: ...` and exit 2; warnings (stale elements, failed download) print as `warning: ...` and do not stop anything.
+Common to all scenario commands: scenario path first, repeated `--set path=value`, repeated `--plugin P` (appended to the scenario's `plugins:`); errors print `error: ...` and exit 2; warnings (stale elements, failed download) print as `warning: ...` and do not stop anything.
 `--from`/`--to` accept ISO-with-zone, `start`, or `+offset` from the clock start; `_window` rejects `--to <= --from`. Default window of `passes`/`truth`/`run` with file sinks: the scenario's `clock` (a serving sink runs past `clock.duration`).
 
 ```mermaid
@@ -1976,34 +2085,33 @@ flowchart TD
 `src/assist/profile/` is a measurement tool. It reads **local, uncommitted data** in `samples/` and writes the committed `profiles/vhf137/`. A normal user never runs it; CI never needs it (tests that need `samples/` skip when it is absent).
 
 **Inputs** (`samples/`, gitignored): one 7.5 GB `baseband_137000000Hz_*.wav` (a 1574 s capture starting 2026-11-01 16:39:00 UTC, uint8 IQ at 2.4 MS/s), two ~1.4 GB `waterfall_*.raw` files (a whole day each of the capture script's 16 384-bin rows, 1 per second),
-`station.yaml`, `active.csv` + `satnogs.csv` element sets, `saw.csv` (the SAW filter's S21), `annotations.yaml` (hand-marked time ranges to exclude from some analyses), and the design plan.
+`station.yaml`, `active.csv` + `satnogs.csv` element sets, `saw.csv` (the SAW filter's S21), and `annotations.yaml` (hand-marked time ranges to exclude from some analyses).
 
 ```mermaid
 flowchart TD
-    WAV["baseband WAV<br/>(fine time)"] --> P1["P1 timing, P2 ADC stats"]
-    WAV --> P2B["P2b ORBCOMM reference<br/>(Doppler fit, pulse, level)"]
-    WAV --> P11["P11 sample bank (clips)"]
-    WAV --> P14["P14 terrestrial: VDL bursts in absolute counts"]
-    RAW["waterfall days<br/>(1 s rows, 2 days)"] --> P3["P3 noise PSD, DC spike,<br/>diurnal curve, regimes"]
-    RAW --> P6["P6 birdies"]
-    RAW --> P7["P7 channel occupancy -> hourly rates"]
-    RAW --> P8["P8 USB humps, wandering lines"]
-    RAW --> P9["P9 image/mirror tests"]
-    RAW --> P10["P10 METEOR level calibration"]
-    EL["element sets + station"] --> P10
-    EL --> P2B
-    P1 --> OUT
-    P2["P2 ADC sigma"] --> OUT
-    P3 --> OUT
-    P6 --> OUT
-    P7 --> EV["events.csv (out/profile)"]
-    P8 --> OUT
-    P9 --> OUT
-    P10 --> OUT
-    P2B --> OUT
-    P11 --> BANK["bank/ (local, gitignored)"]
-    EV --> P14
-    P14 --> TJ["terrestrial.json"]
+    WAV["baseband WAV<br/>(fine time)"] --> ADC["timing and ADC statistics<br/>(wavio, adc)"]
+    WAV --> ORB["ORBCOMM reference<br/>(Doppler fit, pulse, level; orbcomm)"]
+    WAV --> CLIPS["sample bank (clips; bank)"]
+    WAV --> TERR["terrestrial: VDL bursts in absolute counts<br/>(terrestrial)"]
+    RAW["waterfall days<br/>(1 s rows, 2 days)"] --> NOISE["noise PSD, DC spike,<br/>diurnal curve, regimes (noise)"]
+    RAW --> BIRD["birdies (birdies)"]
+    RAW --> OCC["channel occupancy -> hourly rates<br/>(occupancy)"]
+    RAW --> HUMPS["USB humps, wandering lines (humps)"]
+    RAW --> MIRROR["image/mirror tests (mirror)"]
+    RAW --> MCAL["METEOR level calibration<br/>(meteor_cal)"]
+    EL["element sets + station"] --> MCAL
+    EL --> ORB
+    ADC --> OUT
+    NOISE --> OUT
+    BIRD --> OUT
+    OCC --> EV["events.csv (out/profile)"]
+    HUMPS --> OUT
+    MIRROR --> OUT
+    MCAL --> OUT
+    ORB --> OUT
+    CLIPS --> BANK["bank/ (local, gitignored)"]
+    EV --> TERR
+    TERR --> TJ["terrestrial.json"]
     OUT["profiles/vhf137/<br/>profile.json, noise_psd.npy, noise_hourly.npy,<br/>birdies.json, meteor_cal.json, orbcomm_ref.json"]
     TJ --> DERIVE
     OUT --> DERIVE["terrestrial.derive()"]
@@ -2015,24 +2123,24 @@ What each measurement contributes and **who uses it at run time**:
 | File | Made by | Contains | Used by the simulator? |
 |---|---|---|---|
 | `profile.json` | `build` | Everything: inputs, annotations, recording timing, ADC stats (`noise_sigma_mad_counts` = **26.6868**), noise, mirror/image, occupancy, humps, ... | **Yes**, `engine.frontend.noise_spec` reads `fc_hz`, `fs_hz`, `noise.psd_file`, `adc.noise_sigma_mad_counts`. The rest is documentation for humans (and for `derive`). |
-| `noise_psd.npy` | P3 | 16 384 float32 dB values | **Yes**: FIR and `H_rx`. |
-| `meteor_cal.json` | P10 | `fit_per_satellite` / `fit_both` SNR constants `C`, `band_power_fraction`, residual tables | **Yes**: `resolve.calibrations`. |
-| `orbcomm_ref.json` | P2b | ORBCOMM FM117 Doppler fit, pulse fit, `level.link_const_dbhz` | **Yes**: `calibrations["orbcomm"]`. |
-| `birdies.json` | P6 | persistent narrow lines | only via `derive` -> `terrestrial_default.yaml` |
-| `terrestrial.json` | P14 | VDL burst statistics and levels, AM per channel, 138 MHz carrier | only via `derive` |
-| `noise_hourly.npy` | P3 | 24 hourly noise-level values | **No** (the diurnal noise level is not modelled) |
-| `bank/` | P11 | clips of real signals at 50 kS/s | **No** (gitignored; not used by any signal kind) |
+| `noise_psd.npy` | `noise.py` | 16 384 float32 dB values | **Yes**: FIR and `H_rx`. |
+| `meteor_cal.json` | `meteor_cal.py` | `fit_per_satellite` / `fit_both` SNR constants `C`, `band_power_fraction`, residual tables | **Yes**: `resolve.calibrations`. |
+| `orbcomm_ref.json` | `orbcomm.py` | ORBCOMM FM117 Doppler fit, pulse fit, `level.link_const_dbhz` | **Yes**: `calibrations["orbcomm"]`. |
+| `birdies.json` | `birdies.py` | persistent narrow lines | only via `derive` -> `terrestrial_default.yaml` |
+| `terrestrial.json` | `terrestrial.py` (`assist profile terrestrial`) | VDL burst statistics and levels, AM per channel, 138 MHz carrier | only via `derive` |
+| `noise_hourly.npy` | `noise.py` | 24 hourly noise-level values | **No** (the diurnal noise level is not modelled) |
+| `bank/` | `bank.py` | clips of real signals at 50 kS/s | **No** (gitignored; not used by any signal kind) |
 
 The measurements in a little more depth:
 
-* **P2 ADC**: per second, 256-bin histograms of I and Q and the I/Q covariance -> DC, RMS, robust sigma (`1.4826 * MAD`, insensitive to strong bursts), clipping fraction (the real dongle rails at 1 and 254), IQ imbalance and image rejection.
-* **P3 noise**: per day the per-bin **median over per-minute means**; where a day's waterfall clips at its -5 dB floor (SAW notch below ~136.05 MHz) the recording's shape is spliced in; persistent signals (VDL, birdies, DC) are interpolated out; smoothed (31-bin median + 15-bin mean, ~4.5 kHz); 0 dB = median over the flat passband.
-* **P6 birdies**: a bin is a birdie if it exceeds the median of its neighbours (5..40 bins away) by more than 0.5 dB in more than 90 % of the per-minute means.
-* **P7 occupancy**: per row, excess over an hourly baseline; on/off with hysteresis gives events -> hourly rates, durations, levels. Channels: VDL2 25 kHz grid 136.700-136.975, airband 8.33 kHz grid 135.800-136.700, and 138.0-138.2 scanned as one band.
-* **P8 humps**: the "USB humps" are a periodic comb of +-0.2..0.5 dB ripples across the whole band that drifts; per 10-row step the residual is Fourier-analysed across frequency for the dominant spacing (15-150 kHz), amplitude and phase; the phase drift gives the wander speed (this is what `noise_comb` reproduces).
-* **P10 METEOR**: per row of each non-overlapping pass, SNR in 137.9 +- 50 kHz (signal in band over the baseline from 5-15 min outside the pass; saturated rows use a fit of the LRPT spectrum); model `SNR_dB = C + G(off-nadir) + G(90 - el) - FSPL`; only `C` is identifiable, and it becomes the link constant.
-* **P2b ORBCOMM**: channelise to 50 kS/s, carrier track from the squared signal (two lines at `+-rs/4`, carrier = their midpoint), fit Doppler to the predicted range rate (rest frequency and time offset), symbol rate from the cyclostationary line, raised-cosine fit (alpha = 0.405), C/N0 per second.
-* **P14 terrestrial** (`terrestrial.measure`): VDL bursts in the recording's clean part (445-1405 s) are cut out by FFT (+-10 kHz), found on a 0.2 ms power trace, and measured **in absolute ADC counts** over the noise density ASSIST would render at that frequency - so the result is *exactly* the C/N0 a `cn0_dbhz` ground emitter uses. Tight level clusters are fixed ground stations, the rest aircraft; clipped clusters
+* **ADC** (`adc.py`): per second, 256-bin histograms of I and Q and the I/Q covariance -> DC, RMS, robust sigma (`1.4826 * MAD`, insensitive to strong bursts), clipping fraction (the real dongle rails at 1 and 254), IQ imbalance and image rejection.
+* **Noise** (`noise.py`): per day the per-bin **median over per-minute means**; where a day's waterfall clips at its -5 dB floor (SAW notch below ~136.05 MHz) the recording's shape is spliced in; persistent signals (VDL, birdies, DC) are interpolated out; smoothed (31-bin median + 15-bin mean, ~4.5 kHz); 0 dB = median over the flat passband.
+* **Birdies** (`birdies.py`): a bin is a birdie if it exceeds the median of its neighbours (5..40 bins away) by more than 0.5 dB in more than 90 % of the per-minute means.
+* **Occupancy** (`occupancy.py`): per row, excess over an hourly baseline; on/off with hysteresis gives events -> hourly rates, durations, levels. Channels: VDL2 25 kHz grid 136.700-136.975, airband 8.33 kHz grid 135.800-136.700, and 138.0-138.2 scanned as one band.
+* **Humps** (`humps.py`): the "USB humps" are a periodic comb of +-0.2..0.5 dB ripples across the whole band that drifts; per 10-row step the residual is Fourier-analysed across frequency for the dominant spacing (15-150 kHz), amplitude and phase; the phase drift gives the wander speed (this is what `noise_comb` reproduces).
+* **METEOR calibration** (`meteor_cal.py`): per row of each non-overlapping pass, SNR in 137.9 +- 50 kHz (signal in band over the baseline from 5-15 min outside the pass; saturated rows use a fit of the LRPT spectrum); model `SNR_dB = C + G(off-nadir) + G(90 - el) - FSPL`; only `C` is identifiable, and it becomes the link constant.
+* **ORBCOMM reference** (`orbcomm.py`): channelise to 50 kS/s, carrier track from the squared signal (two lines at `+-rs/4`, carrier = their midpoint), fit Doppler to the predicted range rate (rest frequency and time offset), symbol rate from the cyclostationary line, raised-cosine fit (alpha = 0.405), C/N0 per second.
+* **Terrestrial** (`terrestrial.measure`): VDL bursts in the recording's clean part (445-1405 s) are cut out by FFT (+-10 kHz), found on a 0.2 ms power trace, and measured **in absolute ADC counts** over the noise density ASSIST would render at that frequency - so the result is *exactly* the C/N0 a `cn0_dbhz` ground emitter uses. Tight level clusters are fixed ground stations, the rest aircraft; clipped clusters
   are inverted from their rail fraction by simulating bursts through a noisy ADC. The modulation (136.925 MHz: GFSK, 136.975 MHz: D8PSK) is told from the spectrum's -10 dB width.
 * **`derive`** (`terrestrial.derive`/`band_yaml`) turns these into the ~20 sources of `terrestrial_default.yaml`: hourly curves smoothed to *mean plus first daily harmonic*, scaled so the rate at the recording's mid-time equals the recording's; dead-time-corrected Poisson rates (`dead_time_rate`); level clusters -> fixed stations; spread levels -> `per_event.level_db`. **A test regenerates the band file from the committed profile and requires a byte-for-byte match**, so the file is never edited by hand: change the derivation instead.
 
@@ -2042,24 +2150,26 @@ Other `profile` commands: `labels` writes a stratified sample (~200) of the even
 
 ## 15. Tests and CI
 
-363 tests (`uv run pytest`). The design uses named invariants (the `T-` tags in docstrings):
+432 tests (`uv run pytest`). Most of them check a small set of properties:
 
-| Tag | Property | Where |
+| Property | What is checked | Where |
 |---|---|---|
-| **T-WIN** | any window equals the same slice of a longer render; also across worker counts | `test_render`, `test_sinks`, `test_signals`, `test_satellite_render`, `test_terrestrial` (the same property is also checked, untagged, in `test_workers`, `test_truth`, `test_fft_sink`) |
-| **T-DET** | determinism: same scenario -> same hash; truth identical to a committed golden file (written on the dev Mac, checked in CI on Linux) | `test_config`, `test_render`, `test_sinks`, `test_truth` (`tests/fixtures/truth_golden*.csv`) |
-| **T-KEY** | keyed randomness: adding a source changes nothing else | `test_render`, `test_truth`, `test_satellite_render`, `test_terrestrial` |
-| **T-DOP** | Doppler: truth against Skyfield; IQ carrier frequency against truth | `test_orbits`, `test_render`, `test_render_local` |
-| **T-LVL** | levels: the IQ's measured C/N0 and power match the link budget | `test_render`, `test_satellite_render`, `test_render_local` (ground-level C/N0 from the stream is also checked in `test_terrestrial`) |
-| **T-SCH** | schedules: edges, rates, ramps, dead times | `test_emitters`, `test_signals` |
-| **T-SIG** | signal properties: unit power, occupied bandwidth, fitted roll-off, 4th-power line, ORBCOMM through the profile tool's own estimators | `test_signals` (the same signals through the whole engine: `test_satellite_render`) |
-| **T-OLA** | the synthesiser reproduces single tones/signals exactly (both C++ and twin) | `test_synth` |
-| **T-REF** | every C++ kernel equals its numpy twin | `test_dsp_ref` |
-| **T-RTL** | rtl_tcp header, commands, fan-out, pacing, stalls, the rtl_tcp sink through `assist run` | `test_rtltcp` (a stub source whose sample `n` carries `n mod 2^16` makes continuity visible) |
-| **T-WAV** | WAV/RF64/cu8 written and read back; SDR++ names and splits; `run.json` | `test_sinks`, `test_wavio` |
+| Window independence | any window equals the same slice of a longer render; also across worker counts | `test_render`, `test_sinks`, `test_signals`, `test_satellite_render`, `test_terrestrial`, `test_workers`, `test_truth`, `test_fft_sink`, `test_conformance` |
+| Determinism | same scenario -> same hash; truth identical to a committed golden file (written on the dev Mac, checked in CI on Linux) | `test_config`, `test_render`, `test_sinks`, `test_truth` (`tests/fixtures/truth_golden*.csv`) |
+| Keyed randomness | adding a source changes nothing else; scopes with different prefixes never share a key | `test_render`, `test_truth`, `test_satellite_render`, `test_terrestrial`, `test_rng_timebase`, `test_plugins` |
+| Doppler | truth against Skyfield; IQ carrier frequency against truth | `test_orbits`, `test_render`, `test_render_local` |
+| Levels | the IQ's measured C/N0 and power match the link budget | `test_render`, `test_satellite_render`, `test_render_local` (ground-level C/N0 from the stream is also checked in `test_terrestrial`) |
+| Schedules | edges, rates, ramps, dead times | `test_emitters`, `test_signals` |
+| Signal properties | unit power, occupied bandwidth, fitted roll-off, 4th-power line, ORBCOMM through the profile tool's own estimators | `test_signals` (the same signals through the whole engine: `test_satellite_render`) |
+| Synthesiser | reproduces single tones/signals exactly (both C++ and twin) | `test_synth` |
+| Kernel twins | every C++ kernel equals its numpy twin | `test_dsp_ref` |
+| Serving | rtl_tcp header, commands, fan-out, pacing, stalls, the rtl_tcp sink through `assist run` | `test_rtltcp` (a stub source whose sample `n` carries `n mod 2^16` makes continuity visible) |
+| File sinks | WAV/RF64/cu8 written and read back; SDR++ names and splits; `run.json`; several sinks in one run | `test_sinks`, `test_wavio` |
+| Extension points | the registries; `plugins:` loading, name clashes, `only`/`prefix`, API version, provenance and hashes; capability rules; the three example plugins, as files and as the package | `test_plugins`, `test_platforms`, `test_tcp_sink` |
+| Conformance | `assist.testing` passes for the core signals, the fixed platforms and the sinks, for the examples and for the two plugins printed in PLUGINS.md, and catches modules that break the rules | `test_conformance` |
 
 Other groups: configuration (`test_config`, `test_elements`: fake opener, no network), orbits (`test_orbits`, `test_passes`), the profile tool's maths (`test_profile_dsp`, `test_profile_models`, `test_rawio`), the waterfall maths against **verbatim copies of the capture script's code** (`test_waterfall`, `test_fft_sink`), measurement helpers (`test_measure`).
-`test_local_data`, `test_m6_local`, `test_m7_local`, `test_render_local` need `samples/` and are skipped without it (as in CI). `test_environment` checks the Python 3.15 interpreter and dependencies.
+`test_local_data`, `test_satellite_local`, `test_terrestrial_local`, `test_render_local` need `samples/` (or a local render) and are skipped without it (as in CI). `test_environment` checks the Python 3.15 interpreter and dependencies.
 
 **CI** (`.github/workflows/python-app.yml`), on push to `main`/`dev` and PRs to `main`: job *Lint & Type Check* - `uv sync --all-groups` (builds the C++), `ruff check`, `ruff format --check`, `ty check`, `uv lock --check`; job *Tests* - `uv run pytest` on `ubuntu-latest` (the macOS Intel job is commented out: Python setup alone took ~4 min). **pre-commit** runs ruff, ruff-format and ty locally on commit.
 Style: line length 119, ruff rule sets `E F I UP B SIM C4 RUF TCH`.
@@ -2139,45 +2249,234 @@ Narrow stream: 101 x 110 = 11 110 complex samples, all 100 blocks active. The si
 
 **Behaviours worth knowing**
 
-* **Local emitters and the receiver response.** The README says the `platform: local` kinds have "no band-pass response". In the code, only the wideband `noise_comb` bypasses `H_rx`; local `cw` birdies and `noise_band` spurs are rendered by the same synthesiser as everything else and **are multiplied by `H_rx`**.
-  In the passband (0 dB) this changes nothing, but it would attenuate a birdie placed in the SAW notch or at the band edges. (The README line is the part that is out of step with the code.)
+* **Local emitters and the receiver response.** Only the wideband `noise_comb` bypasses `H_rx`; local `cw` birdies and `noise_band` spurs are rendered by the same synthesiser as everything else and **are multiplied by `H_rx`**.
+  In the passband (0 dB) this changes nothing, but it attenuates a birdie placed in the SAW notch or at the band edges.
 * **Truth vs IQ at the pass edges.** Truth rows exist from AOS to LOS at full link-budget level; the IQ rises/falls over `fade_s`. Compare truth with IQ only away from the edges.
 * **The scenario hash depends on `samples/station.yaml`** when you did not give `station:` - the file's presence changes the resolved position. Give a `station:` block for reproducible hashes.
 * **`elements: {latest: true}` can touch the network at resolve time** (download of missing snapshots). It is in `example.yaml` and `realtime.yaml`; `latest_existing: true` or `elements.files` never does. Network access exists only in `orbits/elements.py` (`fetch`, `latest_snapshots`).
 * **A serving sink ignores `clock.duration`** (it streams until stopped or `--duration`); event schedules and geometry are defined for all time, so this is fine.
 * **First seconds of a big live scenario are late once** unless you give a lookahead (`lookahead: 4s` in the `rtl_tcp` sink).
-* **Python 3.15 only** (`requires-python >= 3.15`; the code uses PEP 758 `except A, B:` in `rtltcp.py`).
+* **Python 3.15 only** (`requires-python >= 3.15`; the code uses PEP 758 `except A, B:` in `sinks/stream.py`).
 * **The numpy engine differs by at most one ADC count** in a few parts per million from the C++ engine (float32 FFT rounding); the *hash* does not distinguish them - `run.json` records the engine.
-* **Message numbering**: some error strings still say "until M7"/"until M8" (milestone names from development).
+* **Plugins run with full trust**, in the main process and in every worker. Nothing is sandboxed; nothing is loaded unless the scenario (or `--plugin`) names it.
+* **An external platform cannot use the link budget.** It supplies geometry (so Doppler and visibility) but its emitters take a received level; orbits, the catalog and calibrated levels belong to the core `satellite`.
 
 ---
 
-## 18. Extending ASSIST
+## 18. Extension points: registries, plugins and the public API
 
-**A determinism checklist** - break any item and the T-WIN/T-KEY tests will tell you:
+ASSIST has three extension points: **signals**, **platforms** and **sinks**. The modules shipped in the package (the
+*core* modules) and the ones a scenario brings along (*plugins*, or *external* modules) go through the same decorators,
+the same registries and the same base classes. This section describes that machinery. [PLUGINS.md](PLUGINS.md) is the
+how-to for someone writing a module.
 
-1. Randomness comes from `KeyedRng.stream(...)` or `key64(...)` with *names and absolute integers* as the key. Never `random`, never a stream created by order of use.
+```mermaid
+flowchart LR
+    subgraph CORE["core modules (inside assist/)"]
+        CS["signals/*.py"]
+        CP["platforms/satellite.py, fixed.py"]
+        CK["sinks/wavfile.py, fft.py, rtltcp.py"]
+    end
+    subgraph EXT["plugins (named by the scenario)"]
+        EF["a .py file (path:)"]
+        EM["a module (module:)"]
+        EE["an entry point (name)"]
+    end
+    API["assist.api<br/>register_signal / register_platform / register_sink"]
+    EXT --> API
+    CORE --> DEC
+    API --> DEC["the register decorators"]
+    DEC -->|"core class: registered at once"| REG
+    DEC -->|"external class: declared"| DECL["declared list"]
+    PL["plugins.activate(entries)"] -->|"install exactly the listed ones"| REG
+    DECL --> PL
+    REG["Registry x 3<br/>signals, platforms, sinks"] --> USE["schema, resolve, scene, renderer, runner<br/>signal_class / platform_class / sink_class"]
+```
+
+### 18.1 The registries (`registry.py`)
+
+`Registry[T]` maps names to classes. There are three instances: `registry.signals`, `registry.platforms`,
+`registry.sinks` (together `registry.ALL`). Each holds two tables.
+
+* **Core.** A class whose module is inside the `assist` package is registered the moment its decorator runs. The
+  registry knows the list of core modules by name and imports them **lazily**, the first time it is asked for
+  anything (`_ensure_core`), then orders the names by that list. So the order of `names()` is fixed whatever was
+  imported first, and no module has to import all the kinds to make them known.
+* **External.** A class from any other module is only **declared** when its decorator runs (`Declared(category, name,
+  cls, module)` in a process-wide list; importing a module twice declares once). It becomes *available* when
+  `set_external` installs it, which only `plugins.activate` does. An installed package that no scenario names is
+  therefore never usable by accident, and never even imported.
+
+`get(name)` looks in core, then external, and otherwise raises `RegistryError` with the known names and a hint that
+an external module must be listed under `plugins:`. `set_external` refuses a name that is already a core name and a
+name two plugins both provide; both messages name the plugins and suggest `prefix:` or `only:`. `origin(name)` is
+`core` or the plugin's label, which is what `assist plugins list` prints.
+
+The typed front doors are in the base modules: `signals.base.signal_class`, `platforms.base.platform_class`,
+`sinks.base.sink_class` (each turns `RegistryError` into `ValueError`, so pydantic reports it as a validation error).
+The three decorators `register_signal`, `register_platform`, `register_sink` check the class before registering it
+(it derives from the right base, has a `Params` model of the right type, a valid `mode` / `level_mode`, a consistent
+set of capabilities) and set `cls.kind` to the registered name.
+
+### 18.2 Loading plugins (`plugins.py`)
+
+`plugins.activate(entries, dirs)` is the only way external classes become available. It is called with a scenario's
+`plugins:` list by `config.resolve.resolve_document` (before validation), by `engine.scene.Scene` (with the resolved
+list), by each worker process, and by `assist plugins list`. Per entry:
+
+1. **Normalise** (`normalise`): a bare string is `{name: ...}`; exactly one of `name`, `path`, `module`; unknown keys
+   are errors.
+2. **Load.**
+   * `path:` -> `find_file` tries the path against each directory in `dirs` (the working directory first, then the
+     scenario file's directory), reads the file, computes its sha256, and imports it under a private module name
+     that contains the hash (`assist_plugin_<stem>_<sha12>`). A file is imported once per content; a changed file is
+     a new module. If the entry already carries a `sha256` (a resolved scenario) and the file differs, loading is
+     refused with "has changed since the scenario was resolved".
+   * `module:` -> `importlib.import_module`.
+   * a name -> the entry point of that name in the group `assist.plugins` (`importlib.metadata.entry_points`,
+     queried for that one name), else an importable module of that name. Entry points are a name -> module table
+     only: none is loaded unless named. Two distributions providing the same name is an error.
+3. **Check.** The module must have registered something (`registry.declared_by(module)`), must not be listed twice,
+   and must declare `ASSIST_API` compatible with `API_VERSION` (`check_api`: the same major, a minor not above ours;
+   a missing declaration is an error that says which line to add).
+4. **Select and rename.** `only:` keeps a subset of the declared names (an unknown one is an error); `prefix:`
+   registers them as `prefix.name`.
+5. **Provenance** (`_provenance`): `version` is the module's `__version__`, else the version of the distribution it
+   comes from; a file has its `sha256`.
+
+When every entry is processed, `set_external` replaces the active external set of all three registries **at once**.
+A clash rolls everything back to "no plugins active" and raises `PluginError`. The function returns the entries with
+`api`, `version` and `sha256` filled in; `resolve` writes them into the resolved scenario, which is how a plugin gets
+into the scenario hash ([5.5](#55-stage-5-the-canonical-form-and-the-hash)). `plugins.active()` lists what the last
+activation loaded (label, module, sha256, version, api, distribution, registered names), which `run.json` records.
+
+Activation is a property of the process, not of an object: the scenario activated last decides. That is why `Scene`
+re-activates its own list, and why a worker activates before validating the JSON it was given. Worker processes are
+spawned, so they start with nothing imported: the parent passes `plugins.located()` (where it found each file) and the
+worker calls `plugins.remember` before activating, so a relative `path:` resolves to the same file even though the
+worker has no scenario directory.
+
+`--plugin P` (`plugins.from_cli`: a path when it ends in `.py` or contains a separator, else a name) is appended to
+the scenario's list before all of this, so it is recorded like a listed plugin.
+
+Trust: a plugin is ordinary Python run in-process. There is no sandbox, and none is attempted. The protection is the
+opposite one: nothing runs unless the scenario names it.
+
+### 18.3 RNG scopes
+
+Rule 2 gives every draw a key made of names. `RngScope` (`rng.py`) is how a module is handed its part of the key
+space without the seed: a prefix, and three methods that prepend it (`stream`, `key64`, `child`).
+
+| Consumer | Scope prefix | Made in |
+|---|---|---|
+| resolve-time draws (random expressions, keyed defaults) | `("resolve", source_id, field path)` (plain `KeyedRng.stream`) | `config.randexpr`, `config.resolve` |
+| an emitter's carrier and schedule | `(source_id, emitter_id)` | `Scene` |
+| a core signal | `(source_id, emitter_id)` (`Keys`) | `Renderer` / `make_signal` |
+| a signal from a plugin | `("signal", kind, source_id, emitter_id)` | `make_signal` (`Keys.namespaced`) |
+| a platform | `("platform", platform name, source_id)` | `Scene` |
+| a sink | `("sink", sink name)` | the runner (`_context`) |
+| the receiver noise | `("noise",)` via `key64` | `engine.frontend` |
+
+Two things follow. The keys of the core kinds are exactly the ones they had before scopes existed (no prefix was
+added), which is what kept every render byte-identical when the scopes were introduced. And an external module's
+keys always start with its category and registered name, so it cannot collide with a core module or with another
+plugin, whatever purposes it uses below its prefix.
+
+Which of the two methods to use:
+
+* `key64(purpose)` + a **counter-based kernel** (`dsp.random_bytes(key, block, n)`, `dsp.white(key, h0, nhops, hop)`)
+  for anything long and addressable: data bits, noise. The counter is an absolute index.
+* `stream(purpose, absolute id)` for a handful of draws about one thing: an event's parameters (the schedule's slot
+  stream), a pass's oscillator offset (`"pass", aos_key`), a per-source property.
+
+### 18.4 Platforms by capability
+
+No code asks "is this a satellite?". A platform class declares capabilities as class attributes
+(`platforms/base.py`), and the schema, the resolver, the scene and the engine look those up.
+
+| Capability | `satellite` | `ground` | `local` | Read by |
+|---|---|---|---|---|
+| `fixed` | no | yes | yes | engine (`_control_fixed` instead of geometry), `passes`, `truth` |
+| `needs_orbit` | yes | no | no | schema (orbit required / forbidden), resolve (`_orbit`) |
+| `catalog` | yes | no | no | schema (`in_catalog`, `catalog_norad`) |
+| `supports_oscillator` | yes | no | no | schema (`oscillator`) |
+| `level_mode` | `link_budget` | `received` | `received` | resolve (`_level`): which level keys are allowed and what they become |
+| `fades_at_horizon` | yes | no | no | scene (`Emitter.fade_s`) |
+| `allows_wideband` | no | no | yes | schema (wideband kinds) |
+
+A platform is built by `cls.build(PlatformContext)` and, unless `fixed`, provides `geometry(t)`, `passes(t0, t1)`
+and `max_speed_km_s()` (the bound that sizes the Doppler room in the narrow-rate rule, [9.2](#92-the-narrow-rate-and-the-coarse-bin)).
+`geometry_ms(k)` and `pass_keys(t, passes)` have defaults built on those two; the satellite overrides them with the
+spline's exact-integer versions.
+
+What an **external** platform may be is deliberately narrower, and `register_platform` enforces it: it supplies its
+own geometry (so Doppler and visibility) and takes a **received level**. `needs_orbit`, `catalog` and
+`level_mode = "link_budget"` are refused outside the package, because orbit resolution, the element catalog and the
+link budget with its calibrations are tied to the core `satellite`. A fixed platform cannot have oscillator terms or
+a fade (there are no passes), and wideband signals need a fixed platform. The example `tethered`
+(`examples/plugins/jitter_platform.py`) is a platform with geometry and all other capabilities at their defaults.
+
+### 18.5 Sinks
+
+The sink protocol, the runner and the shared serving code are described where the outputs are
+([section 11](#11-outputs-files-waterfall-rtl_tcp-runjson-workers)). For extension the relevant facts are: a sink
+never launches itself (no command is added, `assist run` drives every registered sink); its settings come from the
+scenario's `sinks:` entry and `--set` only; a push sink must give the same output however the stream is cut into
+pieces; and a serving sink that derives from `StreamSink` writes only a protocol (`greeting`, `read_client`,
+`encode`).
+
+### 18.6 The public API, its version and the conformance checks
+
+`assist/api.py` re-exports what a plugin may use and nothing else: the three decorators and base classes with their
+parameter and context types, `Keys`/`RngScope`, `Event`, `Geometry`, `Pass`, `OutFile`, the pulse-shaping helpers
+(`ShapedSignal`, `ShapedParams`, `rrc_taps`, `unpack`), the range helpers, and the shared serving classes. A test
+(`test_api_is_frozen`) pins `__all__`, so a change to the surface is a deliberate edit.
+
+`API_VERSION` (`"1.0"`, defined in `plugins.py`) covers those names, the behavioural rules (absolute indices, keyed
+randomness, unit power, the sink lifecycle, the capabilities) and two kernels of `self.dsp`: `random_bytes` and
+`white`. The other kernels are internal and may change. The minor grows with additions, the major with anything
+that can break a plugin; a plugin's `ASSIST_API` must have the same major and a minor not above the package's.
+
+`assist/testing.py` turns the rules into checks that use only the public interface: `check_signal` (parameter
+validation, the narrow rate, whole-versus-pieces rendering with fresh instances, unit power, zeros outside event
+bounds), `check_platform` (same seed -> same platform, `geometry` pure and consistent with `geometry_ms`, passes
+independent of the window, the speed bound) and `check_sink` (a push sink writes what it plans and the same bytes
+for any cut; a serving sink serves a short stream on a free port and stops). `tests/test_conformance.py` runs them on
+the core signals, fixed platforms and sinks as well. One known tolerance: the core `lora` forms chirp times from the window start, so two
+*arbitrary* cuts can differ by 1 ulp of float32; it is checked with `atol=1e-6`. The engine always renders the same
+1 s chunks, so rendered bytes are unaffected.
+
+### 18.7 Adding to the core
+
+A new module can live outside the package as a plugin, with no core edits (PLUGINS.md). To add one **to the core**
+instead:
+
+**A determinism checklist** - break any item and the window-independence and keyed-randomness tests will tell you:
+
+1. Randomness comes from an `RngScope` (`stream(...)` or `key64(...)`) with *names and absolute integers* as the key. Never `random`, never a stream created by order of use.
 2. Anything addressable must be a function of an absolute index (symbol, frame, hop, microsecond), not of "where I started".
 3. No state carried between chunks that is not recomputable (see [9.9](#99-why-any-window-gives-the-same-bytes---the-full-state-audit)).
 4. Frequencies in integer mHz, times in integer ms/us where precision matters.
 5. No wall clock, no filesystem, no network after resolve.
 6. Float kernels: no FMA, no libm transcendentals if you need bit-exactness between the C++ and twin.
 
-**Add a signal kind**
+**A signal kind**
 
 1. `signals/<name>.py`: a `SignalParams` subclass (extra=forbid, defaults), a `Signal` subclass with `Params`, `mode`, `bandwidth_hz`, `preferred_rate`, `rate_step`, and `render` (continuous) or `draw_event` + `max_duration_s` + `render_events` + `event_bounds` (event).
-2. Register it: decorate the class with `@register_signal("<name>")` and add the module to the core list in `registry.py`. (A kind kept outside the package needs neither: put it in its own file that imports `assist.api`, and list the file under `plugins:` in the scenario; see `examples/plugins/pretty_gfsk.py`.)
+2. Decorate the class with `@register_signal("<name>")` and add the module to the signals list in `registry.py`.
 3. Use `keys.key64("purpose")` and an absolute counter for every random thing; derive sample times from integers.
-4. If a new numeric kernel is needed: add it to `cpp/*.cpp` + `.hpp`, bind it in `bindings.cpp`, declare it in `_dsp.pyi`, write the twin in `dsp_ref/` and export it from `dsp_ref/__init__.py`, and add a T-REF test.
-5. Tests: unit power, bandwidth, window independence (render a window directly and as a slice).
+4. If a new numeric kernel is needed: add it to `cpp/*.cpp` + `.hpp`, bind it in `bindings.cpp`, declare it in `_dsp.pyi`, write the twin in `dsp_ref/` and export it from `dsp_ref/__init__.py`, and add a comparison to `tests/test_dsp_ref.py`.
+5. Tests: `testing.check_signal` (it is picked up by `test_conformance` for every registered core kind), plus the kind's own properties (bandwidth, structure).
 
-**Add a preset**: a YAML file in `src/assist/presets/` with `platform:` and `emitters:` (ids!); anything the user must supply is simply absent (a missing `orbit` or `level` fails validation with a clear message). Add it to the README table and to `test_presets_resolve`.
+**A platform**: a `Platform` subclass in `platforms/`, registered with `@register_platform("<name>")`, its module added to the platforms list in `registry.py`. Declare the capabilities; implement `build`, and unless `fixed`, `geometry`, `passes` and `max_speed_km_s`.
 
-**Add a schedule type**: a pydantic model in `schema.py` (add it to the `ScheduleConfig` union with a `type` literal), a `Schedule` subclass implementing `envelope`, `active_fraction`, `active_intervals` (and `events` if it is an event schedule, deriving from `_EventSchedule` so slots are keyed), and a branch in `make_schedule`.
+**A sink**: a `Sink` subclass (`sinks/base.py`) registered with `@register_sink("<name>")`, with a `Params` model for its settings, its module added to the sinks list in `registry.py`. A push sink implements `planned` (how many samples it takes), `files`, `write(u8)`, `close` and `abort`: follow `WavSink` (planned size, `close()` check) or `FftSink` (accepts any piece size, may finish early). A serving sink derives from `StreamSink` (`sinks/stream.py`) and supplies a `StreamServer` subclass.
 
-**Add an output sink**: a `Sink` subclass (`sinks/base.py`) registered with `@register_sink("<name>")`, with a `Params` model for its settings. A push sink implements `planned` (how many samples it takes), `files`, `write(u8)`, `close` and `abort`: follow `WavSink` (planned size, `close()` check) or `FftSink` (accepts any piece size, may finish early). A serving sink derives from `StreamSink` (`sinks/stream.py`) and supplies a `StreamServer` subclass (`greeting`, `read_client`, `encode`); rendering ahead, pacing, fan-out and the backlog guard are shared. No command is added: `assist run` drives every registered sink, and the runner writes `run.json`. A core sink's module goes in the list in `registry.py`; an external one lives in its own file listed under `plugins:` (`examples/plugins/tcp_sink.py`).
+**A preset**: a YAML file in `src/assist/presets/` with `platform:` and `emitters:` (ids!); anything the user must supply is simply absent (a missing `orbit` or `level` fails validation with a clear message). Add it to the README table and to `test_presets_resolve`.
 
-**Add a band**: `bands/<name>/band.yaml` (defaults, noise sigma, calibrations, channels) and a profile for it; `noise_spec` insists that profile and scenario agree on `fc`/`fs`.
+**A schedule type**: a pydantic model in `schema.py` (add it to the `ScheduleConfig` union with a `type` literal), a `Schedule` subclass implementing `envelope`, `active_fraction`, `active_intervals` (and `events` if it is an event schedule, deriving from `_EventSchedule` so slots are keyed), and a branch in `make_schedule`. Schedules are not an extension point for plugins.
+
+**A band**: `bands/<name>/band.yaml` (defaults, noise sigma, calibrations, channels) and a profile for it; `noise_spec` insists that profile and scenario agree on `fc`/`fs`. Editing anything under a band or profile directory changes `band_hash` / `profile_hash`, and so the hash of every scenario that uses it.
 
 ---
 

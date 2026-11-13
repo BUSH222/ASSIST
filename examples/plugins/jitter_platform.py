@@ -7,7 +7,7 @@ An external ASSIST platform: this file is everything it needs. A scenario uses i
     sources:
       - id: balloon
         platform: tethered
-        platform_params: {az_deg: 200, el_deg: 35, range_m: 3000, swing_m: 50, period_s: 5}
+        platform_params: {az_deg: 200, el_deg: 35, range_m: 3000, swing_m: 50, period_ms: 5000}
         emitters:
           - id: beacon
             signal: {kind: cw}

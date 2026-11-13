@@ -1,4 +1,4 @@
-// METEOR LRPT channel coding (plan §5, `oqpsk` framing `meteor_cadu`): CCSDS randomiser and the K = 7, r = 1/2
+// METEOR LRPT channel coding (`oqpsk` framing `meteor_cadu`): CCSDS randomiser and the K = 7, r = 1/2
 // convolutional encoder. numpy twin: src/assist/dsp_ref/conv.py
 #pragma once
 

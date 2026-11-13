@@ -1,4 +1,4 @@
-"""`am` (plan §5): airband AM voice transmissions (DSB with full carrier), an event signal (M7).
+"""`am`: airband AM voice transmissions (DSB with full carrier), an event signal.
 
 Each event is one press of the push-to-talk: the carrier rises and falls with raised-cosine ramps of `ptt_ramp_ms`
 inside the event. The voice is cheap synthetic speech, no words: band-limited noise (audio_lo_hz .. audio_hi_hz, with

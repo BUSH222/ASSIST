@@ -1,4 +1,4 @@
-"""Scenario schema (plan §3.3, §3.4, §6, Appendix A): pydantic models of a fully merged scenario.
+"""Scenario schema: pydantic models of a fully merged scenario.
 
 This is the document after includes, `--set`, band defaults, presets and random expressions have been applied; band
 defaults fill `frontend` and `antenna`. Unknown keys are errors (typos fail loudly). `assist schema` exports it.
@@ -78,10 +78,10 @@ class Frontend(_M):
     fc_hz: float
     fs_hz: float = Field(description="Sample rate; an integer multiple of 100 Hz (10 ms hops).")
     tuner_gain_db: float
-    ppm: float = Field(description="Crystal error (sample clock and LO), plan §3.1. Only 0 is supported until M7.")
+    ppm: float = Field(description="Crystal error (sample clock and LO). Only 0 is supported.")
     lna: Lna
     tuner_nf_db: float
-    saw_loss_db: float = Field(description="SAW loss used for T_sys (scalar until the SAW table arrives in M7).")
+    saw_loss_db: float = Field(description="SAW loss used for T_sys (a scalar).")
     t_ant_k: float
     image_db: float
     iip3_dbm: float
@@ -93,9 +93,7 @@ class Frontend(_M):
     @classmethod
     def _ppm(cls, v: float) -> float:
         if v != 0:
-            raise ValueError(
-                "only 0 is supported until M7 (the crystal error of the stream clock is not modelled yet)"
-            )
+            raise ValueError("only 0 is supported (the crystal error of the stream clock is not modelled)")
         return v
 
     @field_validator("fs_hz")
@@ -248,7 +246,7 @@ class SignalConfig(_M):
     kind: str
     params: dict[str, Any] = Field(
         default_factory=dict,
-        description="Parameters of the kind (plan §5); checked, and defaults filled in.",
+        description="Parameters of the kind; checked, and defaults filled in.",
     )
 
     @field_validator("kind")
@@ -295,7 +293,7 @@ class ExpGapsSchedule(_M):
     min_gap_s: float = Field(20.0, ge=0)
     duration: Duration = Field(default_factory=Duration)
     ramp_ms: float = Field(
-        0.0, ge=0, description="Continuous signals: raised-cosine ramps centred on each event's edges (M7)."
+        0.0, ge=0, description="Continuous signals: raised-cosine ramps centred on each event's edges."
     )
 
 
@@ -306,11 +304,11 @@ class PoissonSchedule(_M):
     min_gap_s: float = Field(
         0.0,
         ge=0,
-        description="One transmitter (M7): an event starting less than this after the previous kept event's end "
+        description="One transmitter: an event starting less than this after the previous kept event's end "
         "(within the hour slot) is dropped, so events never overlap. 0: independent events (they may overlap).",
     )
     ramp_ms: float = Field(
-        0.0, ge=0, description="Continuous signals: raised-cosine ramps centred on each event's edges (M7)."
+        0.0, ge=0, description="Continuous signals: raised-cosine ramps centred on each event's edges."
     )
 
     @field_validator("rate_per_hour")
@@ -336,7 +334,7 @@ LEVEL_KEYS = ("p_tx_dbw", "cn0_zenith_dbhz", "cal", "cn0_dbhz", "rx_dbm")
 
 
 class Level(_M):
-    """Satellites: p_tx_dbw, cn0_zenith_dbhz or cal (resolved to p_tx_dbw). Ground and local transmitters (M7): a
+    """Satellites: p_tx_dbw, cn0_zenith_dbhz or cal (resolved to p_tx_dbw). Ground and local transmitters: a
     fixed received level, cn0_dbhz or rx_dbm (resolved to rx_dbm)."""
 
     p_tx_dbw: float | None = Field(None, description="Satellites: power into the transmit antenna.")
@@ -383,7 +381,7 @@ class EventLevel(_M):
 
 
 class PerEvent(_M):
-    """Draws per event (M7), from the schedule's keyed slot stream: a frequency offset and a level. Used for
+    """Draws per event, from the schedule's keyed slot stream: a frequency offset and a level. Used for
     transmitters without geometry, e.g. aircraft VDL bursts (each burst its own offset and power)."""
 
     offset_hz: float | tuple[float, float] = Field(
@@ -425,7 +423,7 @@ class Emitter(_M):
     level: Level | None = Field(
         None, description="Required, except for wideband signals (noise_comb), whose level is relative to the noise."
     )
-    per_event: PerEvent | None = Field(None, description="Frequency offset and level drawn per event (M7).")
+    per_event: PerEvent | None = Field(None, description="Frequency offset and level drawn per event.")
     pattern: PatternSpec = Field(default_factory=lambda: PolyPattern(type="poly", coeffs_db=list(QFH_COEFFS_DB)))
 
     @model_validator(mode="after")

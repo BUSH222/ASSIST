@@ -1,9 +1,9 @@
-"""Per-emitter rendering state (plan §4.1, §4.2): narrow rate and coarse bin, control samples, narrow blocks.
+"""Per-emitter rendering state: narrow rate and coarse bin, control samples, narrow blocks.
 
 **Control samples** are computed per absolute 1 s chunk at whole Unix milliseconds, so every value depends only on
-absolute time, never on where a render starts (window independence, T-WIN):
+absolute time, never on where a render starts (window independence):
 - amplitude: the link budget (sqrt(mW), no AM or schedule);
-- phase, in cycles relative to the coarse bin f_bin = fc + k * 50 Hz (plan §4.1):
+- phase, in cycles relative to the coarse bin f_bin = fc + k * 50 Hz:
 
       phi(t) = 2 pi * integral(f_tx - f_bin) - 2 pi * f_tx(t) * R(t) / c
 
@@ -13,25 +13,25 @@ absolute time, never on where a render starts (window independence, T-WIN):
 
 Both are linearly interpolated to the narrow rate. The schedule envelope (with its 5 ms ramps), the AM gain and
 the horizon mask are evaluated directly at the narrow rate; the `nco` kernel applies level and phase to the
-signal's samples (M6).
+signal's samples.
 
-**Narrow stream** (M5): per chunk c, one vectorised pass gives the narrow samples of all its OLA blocks 100c ..
+**Narrow stream**: per chunk c, one vectorised pass gives the narrow samples of all its OLA blocks 100c ..
 100c + 99, i.e. narrow indices [100c L/2, (100c + 101) L/2) (L/2 = rate / 100, so the stream starts at Unix
 second c), plus a flag per block saying whether the emitter is active in it. Every value depends only on the chunk
 and the absolute index, so the same samples come out whichever window is rendered.
 
-**Event signals** (LoRa, M6): the signal renders the events overlapping the chunk (each whole, from its start);
+**Event signals** (LoRa): the signal renders the events overlapping the chunk (each whole, from its start);
 the schedule envelope is not applied (bursts start and end in the signal). An emitter with several frequencies
 gets one EmitterRender per frequency, each rendering only the events on its own.
 
-**Ground and local emitters** (M7): no geometry, so the control samples are a constant amplitude (the received level)
+**Ground and local emitters**: no geometry, so the control samples are a constant amplitude (the received level)
 and the phase of the constant offset from the bin. Their events (and those of any emitter with per-event draws)
 are rendered one at a time: event signals from their start, continuous signals (cw) under the event's envelope
 with ramps, each multiplied by its own level (`level_db`) and shifted by its own frequency offset (`offset_hz`,
 phase 0 at the event's start sample), then summed; overlapping events (two transmitters on one channel) simply
 add, so they beat.
 
-**Narrow rate** (plan §4.2): r >= 1.25 (B + 2 max|f_rx - f_bin|), a multiple of 100 Hz and of the signal's rate
+**Narrow rate**: r >= 1.25 (B + 2 max|f_rx - f_bin|), a multiple of 100 Hz and of the signal's rate
 step (the symbol rate, so samples per symbol are whole), with an FFT-friendly block length. The excursion bound
 covers the bin rounding, Doppler at the orbit's perigee speed (plus Earth rotation), 6 sigma of the per-pass
 offset and the drift over 30 min. Each chunk checks the actual excursion and fails loudly if it is exceeded.
@@ -69,7 +69,7 @@ EVENT_PAD_S = 0.01  # per-event rendering: events this close outside a window ar
 
 def fade(t: np.ndarray, passes: list[tuple[float, float]], fade_s: float) -> np.ndarray:
     """Visibility as an amplitude gain: 0 outside the passes; inside, a raised-cosine rise from 0 to 1 over the
-    `fade_s` seconds after each pass's AOS and the mirror fall over the `fade_s` seconds before its LOS (plan §6.2: a
+    `fade_s` seconds after each pass's AOS and the mirror fall over the `fade_s` seconds before its LOS (a
     fade from and to pure noise instead of a horizon map). A pass shorter than 2 `fade_s` peaks below 1. A pure
     function of t and the pass, so every window gives the same values."""
     g = np.zeros(t.shape)
@@ -123,7 +123,7 @@ class Control:
 
 @dataclass(frozen=True)
 class Stream:
-    """An emitter's narrow samples for the OLA blocks of one chunk (plan §4.2), before the Hann window."""
+    """An emitter's narrow samples for the OLA blocks of one chunk, before the Hann window."""
 
     x: np.ndarray  # complex64: 101 * L / 2 samples from narrow index 100 c L / 2 (blocks 100c .. 100c + 99)
     active: np.ndarray  # uint8 per block: block 100c + i is synthesised only where active[i]
@@ -157,7 +157,7 @@ class EmitterRender:
         self.f_bin_mhz = fc_mhz + self.k_bin * bin_mhz
         car = em.carrier
         self.fixed = em.fixed
-        # Ground/local emitters, and any with per-event draws, render their events one at a time (M7).
+        # Ground/local emitters, and any with per-event draws, render their events one at a time.
         self.per_event = em.per_event or (self.fixed and em.is_event)
         excursion = abs(rest - self.f_bin_mhz) / 1000.0 + em.max_event_offset_hz
         if not self.fixed:
@@ -199,7 +199,7 @@ class EmitterRender:
         return hr in self._hours
 
     def prefetch_hour(self, hr: int) -> None:
-        """Compute hour hr's passes (and the geometry under them) ahead of need (live serving, plan §4.5)."""
+        """Compute hour hr's passes (and the geometry under them) ahead of need (live serving)."""
         self._hour_passes(hr)
 
     def _passes(self, t0: float, t1: float) -> list[Pass]:
@@ -351,7 +351,7 @@ class EmitterRender:
 
     def _events_x(self, n0: int, k: int, t_lo: float, t_hi: float) -> np.ndarray:
         """Narrow samples [n0, n0 + k) of the events touching [t_lo, t_hi], one at a time, each with its own level and
-        frequency offset (M7)."""
+        frequency offset."""
         x = np.zeros(k, dtype=np.complex64)
         rate = self.rate
         ramp = float(getattr(self.em.schedule, "ramp_s", 0.0))

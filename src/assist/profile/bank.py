@@ -1,4 +1,4 @@
-"""P11: sample bank. Clips of real signals from the recording, mixed to baseband and decimated to 50 kS/s.
+"""Sample bank. Clips of real signals from the recording, mixed to baseband and decimated to 50 kS/s.
 
 Each clip is a complex64 .npy plus an entry in index.json: id, label guess, centre frequency, rate, start (Unix
 and seconds from the file start), duration, level. The bank is local data (not committed).

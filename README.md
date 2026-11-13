@@ -25,6 +25,15 @@ What it can synthesise:
 
 Payloads are random: the signals are realistic at the spectrum and symbol level, but they are not decodable.
 
+Signal kinds, platforms and output sinks are extension points: a scenario can name external Python modules
+(*plugins*) that add more, without any change to ASSIST itself.
+
+| Document | For |
+|---|---|
+| this file | Using ASSIST: commands, scenario files, outputs |
+| [PLUGINS.md](PLUGINS.md) | Writing a signal, a platform or a sink of your own |
+| [HOW-IT-WORKS.md](HOW-IT-WORKS.md) | The internals, module by module |
+
 ## Contents
 
 1. [Installation](#installation)
@@ -94,7 +103,8 @@ uv run assist truth  scenarios/signal_tour.yaml -o out/tour/truth.csv
 ## Commands
 
 Every command that reads a scenario takes the scenario path first and accepts `--set path=value` (repeatable) to
-override a field without editing the file; see [overrides](#includes-merging-and-overrides). A time option
+override a field without editing the file; see [overrides](#includes-merging-and-overrides). Each also accepts
+`--plugin P` (repeatable) to load one more [plugin](#plugins) for that run. A time option
 (`--from`, `--to`) is an ISO 8601 time with a zone (`2026-11-03T09:00:00Z`), `start`, or an offset from the scenario's
 clock start (`+7min`, `+90s`, `+2h`). A duration is `90s`, `10min`, `2h`, `1d` or a number of seconds.
 
@@ -212,9 +222,10 @@ A **source** is one transmitting object (or one source of interference) with one
 |---|---|---|
 | `id` | required | Unique name. Used by `--set`, by merging, and to key the random draws. |
 | `preset` | – | Start from a [preset](#presets). Your keys override the preset's. |
-| `platform` | `satellite` | `satellite`: has an `orbit`, Doppler, a link budget and passes. `ground`: a terrestrial transmitter (aircraft, ground station) with a fixed received level and no geometry. `local`: interference made inside the receiver (birdies, USB noise), a fixed level and no antenna. |
+| `platform` | `satellite` | `satellite`: has an `orbit`, Doppler, a link budget and passes. `ground`: a terrestrial transmitter (aircraft, ground station) with a fixed received level and no geometry. `local`: interference made inside the receiver (birdies, USB noise), a fixed level and no antenna. A [plugin](#plugins) can add others. |
+| `platform_params` | – | Settings of the platform, for platforms that have any (those from plugins; the three core ones have none). Checked by the platform; unknown keys are errors. |
 | `name` | – | Free label. |
-| `orbit` | – | Required for satellites, forbidden otherwise. See [Orbits](#orbits). |
+| `orbit` | – | Required for `satellite` sources, forbidden otherwise. See [Orbits](#orbits). |
 | `in_catalog` | `true` for catalog orbits, `false` for synthetic ones | Whether `assist catalog` lists the object. |
 | `catalog_norad` | – | NORAD id under which a synthetic object appears in the catalog (needed with `in_catalog: true`; must not collide with a real one). |
 | `channels` | – | A list of frequencies (Hz) or channel names (`S-5`) of this source. An emitter's `channel: 0` picks item 0. Mostly used with a random expression, as in the `orbcomm` preset. |
@@ -288,6 +299,7 @@ Signals are normalised to unit mean power while on; the level sets the power. Fr
 `signal: {kind: <name>, params: {...}}`. Parameters not given take the defaults below; unknown parameters are errors.
 Ranges (`[lo, hi]`) are inclusive and are drawn per burst. Kinds are *continuous* (always renderable, gated by the
 schedule), *event* (the schedule places events and the signal decides their length and content) or *wideband*.
+These are the core kinds; a [plugin](#plugins) can add others, and `assist plugins list` shows all that are known.
 
 | Kind | Mode | Models | Parameters (default) |
 |---|---|---|---|
@@ -310,7 +322,8 @@ Rules that follow from the modes:
   gates them, with `ramp_ms` raised-cosine ramps centred on each event's edges.
 - **`noise_comb`** (wideband) needs `platform: local`, an event schedule, and no `level`, `per_event` or `am`. Its
   episodes are the schedule's events.
-- The `platform: local` kinds (`cw`, `noise_band`, `noise_comb`) are added inside the receiver: no antenna, no band-pass response.
+- The `platform: local` kinds (`cw`, `noise_band`, `noise_comb`) are generated inside the receiver: a fixed level, no antenna. `noise_comb` is added
+  just before the ADC and bypasses the receiver's band-pass response; `cw` and `noise_band` pass through it like any other signal.
 
 ### Schedules
 
@@ -345,7 +358,7 @@ Exactly one key, depending on the platform. All C/N0 values are in dB-Hz *agains
 | `p_tx_dbw` | Power into the transmit antenna. |
 
 **Ground and local** (a fixed received level; no geometry): `cn0_dbhz` (received C/N0), or `rx_dbm` (power at the
-antenna terminals).
+antenna terminals). A platform from a plugin takes a received level too, also when it has geometry.
 
 `extra_loss_db` (default 0) can be added to any form: a loss in dB applied to the received level, e.g. `level: {cn0_dbhz: 48, extra_loss_db: 3}`.
 
@@ -506,17 +519,33 @@ plugins:
   - psk8                                     # an entry point of the group `assist.plugins`, else a module name
 ```
 
-A plugin is ordinary Python that imports `assist.api` and runs in the same process with full trust. It states the
-API version it was written for (`ASSIST_API = "1.0"`); one written for another major version, or for a newer minor
-than the installed `assist.api`, is refused with a message that says so. The examples in
-`examples/plugins/` are one file each: `pretty_gfsk.py` (a signal: 38.4 kbaud GFSK bursts), `jitter_platform.py`
-(a platform: a tethered beacon with Doppler) and `tcp_sink.py` (a sink: raw TCP in cu8, cs16 or cf32).
+A name that clashes with a core name or with another listed plugin is an error; `prefix:` or `only:` resolves it.
+`--plugin P` (a `.py` file or a name) on any command that reads a scenario adds one more for that run.
+
+**Trust.** A plugin is ordinary Python that imports `assist.api`. It runs in the same process as ASSIST, and in its
+worker processes, with your full rights: nothing is sandboxed. List only modules you would run yourself. Nothing is
+loaded unless a scenario (or `--plugin`) names it, so an installed plugin package is inert until then.
+
+A plugin states the API version it was written for (`ASSIST_API = "1.0"`); one written for another major version,
+or for a newer minor than the installed `assist.api`, is refused with a message that says so.
+
+The examples are in `examples/`:
+
+| Example | Adds |
+|---|---|
+| `plugins/pretty_gfsk.py` | Signal kind `pretty_gfsk`: 38.4 kbaud GFSK bursts (used by `scenarios/pretty_gfsk.yaml`) |
+| `plugins/jitter_platform.py` | Platform `tethered`: a beacon in a fixed direction whose range swings, so it has Doppler |
+| `plugins/tcp_sink.py` | Sink `tcp`: the stream over raw TCP as cu8, cs16 or cf32 |
+| `assist-examples/` | The same three modules as an installable package with entry points (`plugins: [pretty_gfsk]`) |
+
 
 The version, declared API version and (for a file) sha256 of each plugin are stored in the resolved scenario, so they
 are part of the scenario hash and of `run.json`: a changed plugin is a changed scenario. A scenario without plugins
 has no such entry, and its hash does not depend on the plugin machinery. `assist plugins list scenario.yaml` shows
-what a scenario would load. `assist.testing` has conformance checks (`check_signal`, `check_platform`, `check_sink`)
-for a plugin's own tests.
+what a scenario would load.
+
+[PLUGINS.md](PLUGINS.md) is the guide to writing one: the three interfaces, the rules for random numbers, the
+conformance checks of `assist.testing`, packaging and the API version policy.
 
 ### Bands and profiles
 
@@ -544,6 +573,7 @@ All are in `scenarios/` and validate on a fresh checkout (they read `elements/` 
 | `terrestrial_hour.yaml` | The terrestrial environment for the hour of the station's recording, plus ORBCOMM FM117 and METEOR. |
 | `serve_demo.yaml`, `serve_satellites.yaml`, `serve_terrestrial.yaml` | Live (`now`) scenarios with synthetic passes placed around the launch time: zombies; METEOR + ORBCOMM + LoRa; the terrestrial environment alone. |
 | `zombie_single.yaml` | The smallest useful scenario: one zombie on a 45° pass. |
+| `pretty_gfsk.yaml` | A signal kind from a plugin: GFSK bursts like PRETTY (NORAD 58023) on 137.78 MHz, with an `fft` sink. |
 | `example.yaml` | Catalog orbits (both METEORs, TRANSIT 5B-5) beside a synthetic zombie. |
 
 ## Recipes
@@ -646,4 +676,5 @@ uv run pytest
   twin in `src/assist/dsp_ref/`, compared in `tests/test_dsp_ref.py`.
 - **`ASSIST_NATIVE=ON uv sync --reinstall-package assist`** builds with `-march=native` (local use only); a plain `uv sync --reinstall-package assist` switches back.
 - **Speed**: one core renders the realtime scenario at ~7x real time; the file render runs in parallel worker processes (20–30x on 6 cores) and gives the same bytes for any worker count.
+- **Extending**: new signal kinds, platforms and sinks are written against `assist.api`, as plugins or as core modules; see [PLUGINS.md](PLUGINS.md). [HOW-IT-WORKS.md](HOW-IT-WORKS.md) explains every module.
 - Large local data (recordings, waterfall captures) lives in `samples/`, which is gitignored; CI tests never need it, and the local-data tests skip when it is absent.

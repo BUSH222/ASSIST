@@ -1,4 +1,4 @@
-# METEOR-M LRPT (plan §6.5): 72 ksym/s OQPSK, RRC alpha 0.6, METEOR CADU framing, on 137.9 MHz, continuous.
+# METEOR-M LRPT: 72 ksym/s OQPSK, RRC alpha 0.6, METEOR CADU framing, on 137.9 MHz, continuous.
 # Level `cal: meteor_auto`: the M1 calibration of METEOR-M2 3 (NORAD 57166) or M2-4 (NORAD 59051) for those catalog
 # objects, the joint `meteor` calibration otherwise.
 platform: satellite

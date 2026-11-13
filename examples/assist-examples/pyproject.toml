@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "assist-examples"
+version = "0.1.0"
+description = "Example plugins for ASSIST: a signal (pretty_gfsk), a platform (tethered) and a sink (tcp)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.15"
+dependencies = [
+    "assist",
+    "numpy>=2.5.4",
+    "pydantic>=2.14.2",
+]
+
+# One entry point per plugin: the name a scenario lists under `plugins:`, and the module that registers the classes.
+# ASSIST reads this table only to find the module of a name a scenario lists; it never loads an entry point that no
+# scenario names.
+[project.entry-points."assist.plugins"]
+pretty_gfsk = "assist_examples.pretty_gfsk"
+tethered = "assist_examples.jitter_platform"
+tcp = "assist_examples.tcp_sink"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/assist_examples"]

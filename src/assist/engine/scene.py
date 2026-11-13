@@ -1,4 +1,4 @@
-"""The scene: platforms and emitters built from a resolved scenario (plan §0: a pure function of it)."""
+"""The scene: platforms and emitters built from a resolved scenario (a pure function of it)."""
 
 import math
 from dataclasses import dataclass, field
@@ -46,7 +46,7 @@ def _duration(d: S.Duration) -> DurationDist:
 
 
 def _draw_per_event(pe: S.PerEvent, g: np.random.Generator) -> dict[str, Any]:
-    """Per-event frequency offset (rounded to 1 mHz) and level (dB), from the slot stream (M7)."""
+    """Per-event frequency offset (rounded to 1 mHz) and level (dB), from the slot stream."""
     out: dict[str, Any] = {}
     lo, hi = float_range(pe.offset_hz)
     off = float(g.uniform(lo, hi)) if hi > lo else lo
@@ -65,7 +65,7 @@ def make_maker(e: S.Emitter) -> EventMaker | None:
     """Event and wideband signals, and emitters with per-event draws: each event's duration and parameters, drawn in
     this order from the slot stream: the frequency index of a multi-frequency emitter (only when there is a
     choice), the signal's parameters and duration (or the schedule's duration distribution), the per-event offset
-    and level (M7)."""
+    and level."""
     mode = get_kind(e.signal.kind).mode
     pe = e.per_event
     if mode == "continuous" and pe is None:
